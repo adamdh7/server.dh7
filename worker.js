@@ -174,7 +174,7 @@ export default {
         checkOrgOrigin(user, origin);
         const chat_id = getChatId(user1_tfid, user2_tfid);
         const { results } = await env.B1.prepare(`
-          SELECT id, chat_id, from_tfid AS from, text, time, is_read AS read FROM messages WHERE chat_id = ? ORDER BY time ASC
+          SELECT id, chat_id, from_tfid AS "from", text, time, is_read AS read FROM messages WHERE chat_id = ? ORDER BY time ASC
         `).bind(chat_id).all();
         return new Response(JSON.stringify(results), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
