@@ -1,6 +1,6 @@
 name = "serverdh7"
 main = "worker.js"
-compatibility_date = "2026-07-01"
+compatibility_date = "2026-01-07"
 
 [[d1_databases]]
 binding = "B1"
