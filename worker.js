@@ -62,6 +62,13 @@ export default {
         return user;
       };
 
+      const stripSensitiveArray = (users) => {
+        return users.map(u => {
+          delete u.password;
+          return u;
+        });
+      };
+
       const generateRandomTfid = () => {
         let number = '';
         for (let i = 0; i < 7; i++) {
@@ -151,19 +158,11 @@ export default {
         });
       }
 
-      if (path === '/subscribe' && method === 'POST') {
-        const body = await request.json();
-        const { tfid, subscription } = body;
-        if (!tfid || !subscription) return new Response(JSON.stringify({ success: false, error: 'Missing tfid or subscription' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        const user = await getUserByTfid(tfid);
-        if (!user) return new Response(JSON.stringify({ success: false, error: 'User not found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        if (user.org_url !== null) return new Response(JSON.stringify({ success: false, error: 'Operation not allowed for org users' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        checkOrgOrigin(user, origin);
-        const { changes } = await env.B1.prepare(`
-          UPDATE users SET push_subscription = ? WHERE tfid = ?
-        `).bind(JSON.stringify(subscription), tfid).run();
-        if (changes === 0) return new Response(JSON.stringify({ success: false, error: 'Update failed' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      if (path === '/users' && method === 'GET') {
+        const { results } = await env.B1.prepare('SELECT * FROM users').all();
+        return new Response(JSON.stringify(stripSensitiveArray(results)), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
 
       if (path === '/messages' && method === 'POST') {
@@ -177,7 +176,7 @@ export default {
         const { results } = await env.B1.prepare(`
           SELECT * FROM messages WHERE chat_id = ? ORDER BY time ASC
         `).bind(chat_id).all();
-        return new Response(JSON.stringify({ success: true, messages: results }), {
+        return new Response(JSON.stringify(results), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
@@ -195,7 +194,7 @@ export default {
           INSERT INTO messages (chat_id, from_tfid, text, time, is_read)
           VALUES (?, ?, ?, ?, 0)
         `).bind(chat_id, sender_tfid, message, time).run();
-        return new Response(JSON.stringify({ success: true }), { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        return new Response(null, { status: 201, headers: corsHeaders });
       }
 
       if (path === '/mark-read' && method === 'POST') {
@@ -207,12 +206,10 @@ export default {
         if (user.org_url !== null) return new Response(JSON.stringify({ success: false, error: 'Operation not allowed for org users' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         checkOrgOrigin(user, origin);
         const chat_id = getChatId(sender_tfid, receiver_tfid);
-        const { changes } = await env.B1.prepare(`
+        await env.B1.prepare(`
           UPDATE messages SET is_read = 1 WHERE chat_id = ? AND from_tfid = ? AND is_read = 0
         `).bind(chat_id, sender_tfid).run();
-        return new Response(JSON.stringify({ success: true, marked_as_read: changes }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        return new Response(null, { status: 200, headers: corsHeaders });
       }
 
       return new Response(JSON.stringify({ success: false, error: 'Endpoint not found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
