@@ -4,23 +4,34 @@ export default {
     const path = url.pathname;
     const method = request.method;
 
-    const silentResponse = new Response(null, { status: 204 });
+    const blankResponse = new Response(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title></title>
+</head>
+<body>
+</body>
+</html>`, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' }
+    });
 
-    const createJsonResponse = (obj, status = 200, allowCors = false) => {
+    const createJsonResponse = (obj, status = 200) => {
+      const origin = request.headers.get('Origin');
       const headers = {
         'Content-Type': 'application/json',
       };
-      const origin = request.headers.get('Origin');
-      if (origin && allowCors) {
+      if (origin) {
         headers['Access-Control-Allow-Origin'] = origin;
       }
       return new Response(JSON.stringify(obj), { status, headers });
     };
 
-    const createNoContentResponse = (status = 204, allowCors = false) => {
-      const headers = {};
+    const createNoContentResponse = (status = 204) => {
       const origin = request.headers.get('Origin');
-      if (origin && allowCors) {
+      const headers = {};
+      if (origin) {
         headers['Access-Control-Allow-Origin'] = origin;
       }
       return new Response(null, { status, headers });
@@ -57,7 +68,7 @@ export default {
       if (method === 'OPTIONS') {
         const origin = request.headers.get('Origin');
         if (!origin) {
-          return silentResponse;
+          return new Response(null, { status: 204 });
         }
         return new Response(null, {
           headers: {
@@ -69,20 +80,26 @@ export default {
       }
 
       const origin = request.headers.get('Origin');
-      const currentOriginNormalized = origin ? new URL(origin).origin : '';
-      let originHost = null;
-      if (origin) {
-        try {
-          originHost = new URL(origin).hostname;
-        } catch {}
+      if (!origin) {
+        return blankResponse;
+      }
+
+      let currentOriginNormalized;
+      let originHost;
+      try {
+        const o = new URL(origin);
+        currentOriginNormalized = o.origin;
+        originHost = o.hostname;
+      } catch {
+        return blankResponse;
       }
 
       const allowedOriginHosts = new Set(['teste777.pages.dev', 'adamdh7.org', 'ai.adamdh7.org', 'dh7.adamdh7.org']);
-      const isMainOriginAllowed = !origin || allowedOriginHosts.has(originHost);
+      const isMainOriginAllowed = allowedOriginHosts.has(originHost);
 
       const isOriginAllowedForUser = (user) => {
         if (!user) return false;
-        if (user.org_url == null) {
+        if (user.org_url === null) {
           return isMainOriginAllowed;
         }
         return currentOriginNormalized === user.org_url;
@@ -119,30 +136,50 @@ export default {
       };
 
       if (path === '/login' && method === 'POST') {
-        const body = await request.json();
+        let body;
+        try {
+          body = await request.json();
+        } catch {
+          return blankResponse;
+        }
         const { identifier, password } = body;
-        if (!identifier || !password) return createJsonResponse({ success: false, error: 'Missing identifier or password' }, 400, false);
+        if (!identifier || !password) {
+          return createJsonResponse({ success: false, error: 'Missing identifier or password' }, 400);
+        }
         const { results } = await env.B1.prepare(`
           SELECT * FROM users WHERE (tfid = ? OR dh7 = ?) AND password = ?
         `).bind(identifier, identifier, password).all();
-        if (results.length === 0) return createJsonResponse({ success: false, error: 'Invalid credentials' }, 401, false);
+        if (results.length === 0) {
+          return createJsonResponse({ success: false, error: 'Invalid credentials' }, 401);
+        }
         const user = results[0];
-        if (!isOriginAllowedForUser(user)) return silentResponse;
-        return createJsonResponse({ success: true, user: stripSensitive(user) }, 200, true);
+        if (!isOriginAllowedForUser(user)) {
+          return createJsonResponse({ success: false, error: 'Invalid credentials' }, 401);
+        }
+        return createJsonResponse({ success: true, user: stripSensitive(user) });
       }
 
       if (path === '/register' && method === 'POST') {
-        if (!isMainOriginAllowed) return silentResponse;
-        const body = await request.json();
+        if (!isMainOriginAllowed) {
+          return blankResponse;
+        }
+        let body;
+        try {
+          body = await request.json();
+        } catch {
+          return blankResponse;
+        }
         let { nom, prenom, dh7, age, password, org_url } = body;
-        if (!nom || !prenom || !dh7 || !age || !password) return createJsonResponse({ success: false, error: 'Missing fields' }, 400, true);
+        if (!nom || !prenom || !dh7 || !age || !password) {
+          return createJsonResponse({ success: false, error: 'Missing fields' }, 400);
+        }
         dh7 = dh7.toLowerCase().trim();
         if (!dh7.includes('@dh7.tf')) {
           dh7 += '@dh7.tf';
         }
         const username = dh7.replace('@dh7.tf', '');
         if (!/^[a-z0-9]+$/.test(username) || username.length === 0) {
-          return createJsonResponse({ success: false, error: 'Invalid dh7 format: only lowercase letters and numbers allowed' }, 400, true);
+          return createJsonResponse({ success: false, error: 'Invalid dh7 format: only lowercase letters and numbers allowed' }, 400);
         }
         dh7 = username + '@dh7.tf';
         const storedOrgUrl = org_url ? new URL(org_url).origin : currentOriginNormalized;
@@ -152,7 +189,9 @@ export default {
             VALUES (?, ?, ?, ?, ?, ?)
           `).bind(dh7, nom, prenom, age, password, storedOrgUrl).run();
         } catch (e) {
-          if (e.message.includes('UNIQUE')) return createJsonResponse({ success: false, error: 'dh7 already exists' }, 409, true);
+          if (e.message.includes('UNIQUE')) {
+            return createJsonResponse({ success: false, error: 'dh7 already exists' }, 409);
+          }
           throw e;
         }
         const { results: idResults } = await env.B1.prepare('SELECT last_insert_rowid() AS new_id').all();
@@ -172,63 +211,96 @@ export default {
             throw e;
           }
         }
-        if (attempts >= 50) return createJsonResponse({ success: false, error: 'Unable to generate unique tfid' }, 500, true);
+        if (attempts >= 50) {
+          return createJsonResponse({ success: false, error: 'Unable to generate unique tfid' }, 500);
+        }
         const { results } = await env.B1.prepare('SELECT * FROM users WHERE id = ?').bind(newId).all();
         const user = stripSensitive(results[0]);
-        return createJsonResponse({ success: true, tfid, user }, 201, true);
+        return createJsonResponse({ success: true, tfid, user }, 201);
       }
 
       if (path === '/users' && method === 'GET') {
-        if (!isMainOriginAllowed) return silentResponse;
+        if (!isMainOriginAllowed) {
+          return blankResponse;
+        }
         const { results } = await env.B1.prepare('SELECT * FROM users').all();
-        return createJsonResponse(stripSensitiveArray(results), 200, true);
+        return createJsonResponse(stripSensitiveArray(results));
       }
 
       if (path === '/messages' && method === 'POST') {
-        const body = await request.json();
+        let body;
+        try {
+          body = await request.json();
+        } catch {
+          return blankResponse;
+        }
         const { user1_tfid, user2_tfid } = body;
-        if (!user1_tfid || !user2_tfid) return createJsonResponse({ success: false, error: 'Missing tfids' }, 400, false);
+        if (!user1_tfid || !user2_tfid) {
+          return blankResponse;
+        }
         const user = await getUserByTfid(user1_tfid);
-        if (!user || !isOriginAllowedForUser(user)) return silentResponse;
+        if (!user || !isOriginAllowedForUser(user)) {
+          return blankResponse;
+        }
         const chat_id = getChatId(user1_tfid, user2_tfid);
         const { results } = await env.B1.prepare(`
           SELECT id, chat_id, from_tfid AS "from", text, time, is_read AS read FROM messages WHERE chat_id = ? ORDER BY time ASC
         `).bind(chat_id).all();
-        return createJsonResponse(results, 200, true);
+        return createJsonResponse(results);
       }
 
       if (path === '/send' && method === 'POST') {
-        const body = await request.json();
+        let body;
+        try {
+          body = await request.json();
+        } catch {
+          return blankResponse;
+        }
         const { sender_tfid, receiver_tfid, message } = body;
-        if (!sender_tfid || !receiver_tfid || !message) return createJsonResponse({ success: false, error: 'Missing fields' }, 400, false);
+        if (!sender_tfid || !receiver_tfid || !message) {
+          return blankResponse;
+        }
         const user = await getUserByTfid(sender_tfid);
-        if (!user || !isOriginAllowedForUser(user)) return silentResponse;
+        if (!user || !isOriginAllowedForUser(user)) {
+          return blankResponse;
+        }
         const chat_id = getChatId(sender_tfid, receiver_tfid);
         const time = new Date().toISOString();
         await env.B1.prepare(`
           INSERT INTO messages (chat_id, from_tfid, text, time, is_read)
           VALUES (?, ?, ?, ?, 0)
         `).bind(chat_id, sender_tfid, message, time).run();
-        return createNoContentResponse(201, true);
+        return createNoContentResponse(201);
       }
 
       if (path === '/mark-read' && method === 'POST') {
-        const body = await request.json();
+        let body;
+        try {
+          body = await request.json();
+        } catch {
+          return blankResponse;
+        }
         const { sender_tfid, receiver_tfid } = body;
-        if (!sender_tfid || !receiver_tfid) return createJsonResponse({ success: false, error: 'Missing tfids' }, 400, false);
+        if (!sender_tfid || !receiver_tfid) {
+          return blankResponse;
+        }
         const user = await getUserByTfid(receiver_tfid);
-        if (!user || !isOriginAllowedForUser(user)) return silentResponse;
-        if (user.org_url !== null) return createJsonResponse({ success: false, error: 'Operation not allowed for org users' }, 403, true);
+        if (!user || !isOriginAllowedForUser(user)) {
+          return blankResponse;
+        }
+        if (user.org_url !== null) {
+          return createJsonResponse({ success: false, error: 'Operation not allowed for org users' }, 403);
+        }
         const chat_id = getChatId(sender_tfid, receiver_tfid);
         await env.B1.prepare(`
           UPDATE messages SET is_read = 1 WHERE chat_id = ? AND from_tfid = ? AND is_read = 0
         `).bind(chat_id, sender_tfid).run();
-        return createNoContentResponse(200, true);
+        return createNoContentResponse(200);
       }
 
-      return createJsonResponse({ success: false, error: 'Endpoint not found' }, 404, false);
+      return blankResponse;
     } catch (err) {
-      return createJsonResponse({ success: false, error: err.message }, 500, false);
+      return blankResponse;
     }
   }
 };
