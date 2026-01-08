@@ -43,7 +43,7 @@ export default {
       }
 
       const origin = request.headers.get('Origin');
-      const allowedHosts = ['teste777.pages.dev', 'adamdh7.org', 'ai.adamdh7.org'];
+      const allowedHosts = ['teste777.pages.dev', 'adamdh7.org', 'ai.adamdh7.org', 'dh7.adamdh7.org'];
       let originHost = null;
       if (origin) {
         try {
@@ -69,47 +69,69 @@ export default {
         });
       };
 
+      const generateRandomTfid = () => {
+        let number = '';
+        for (let i = 0; i < 7; i++) {
+          number += Math.floor(Math.random() * 9) + 1;
+        }
+        return `TF-${number}`;
+      };
+
       if (path === '/login' && method === 'POST') {
         const body = await request.json();
         const { identifier, password } = body;
-        if (!identifier || !password) return new Response('Missing identifier or password', { status: 400, headers: corsHeaders });
+        if (!identifier || !password) return new Response(JSON.stringify({ success: false, error: 'Missing identifier or password' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         const { results } = await env.B1.prepare(`
           SELECT * FROM users WHERE (tfid = ? OR dh7 = ?) AND password = ?
         `).bind(identifier, identifier, password).all();
-        if (results.length === 0) return new Response('Invalid credentials', { status: 401, headers: corsHeaders });
-        return new Response(JSON.stringify(stripSensitive(results[0])), {
+        if (results.length === 0) return new Response(JSON.stringify({ success: false, error: 'Invalid credentials' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ success: true, user: stripSensitive(results[0]) }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
       if (path === '/register' && method === 'POST') {
         if (!isAllowedOrigin) {
-          return new Response('Forbidden: invalid origin', { status: 403, headers: corsHeaders });
+          return new Response(JSON.stringify({ success: false, error: 'Forbidden: invalid origin' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
 
         const body = await request.json();
-        const { nom, prenom, dh7, age, password } = body;
-        if (!nom || !prenom || !dh7 || !age || !password) return new Response('Missing fields', { status: 400, headers: corsHeaders });
+        const { nom, prenom, dh7, age, password, org_url } = body;
+        if (!nom || !prenom || !dh7 || !age || !password) return new Response(JSON.stringify({ success: false, error: 'Missing fields' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
         try {
           await env.B1.prepare(`
             INSERT INTO users (dh7, nom, prenom, age, password, org_url)
             VALUES (?, ?, ?, ?, ?, ?)
-          `).bind(dh7, nom, prenom, age, password, origin || null).run();
+          `).bind(dh7, nom, prenom, age, password, org_url || null).run();
         } catch (e) {
-          if (e.message.includes('UNIQUE')) return new Response('dh7 already exists', { status: 409, headers: corsHeaders });
+          if (e.message.includes('UNIQUE')) return new Response(JSON.stringify({ success: false, error: 'dh7 already exists' }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
           throw e;
         }
 
         const { results: idResults } = await env.B1.prepare('SELECT last_insert_rowid() AS new_id').all();
         const newId = idResults[0].new_id;
-        const numberPart = String(newId).padStart(7, '0');
-        const tfid = `TF-${numberPart}`;
 
-        await env.B1.prepare('UPDATE users SET tfid = ? WHERE id = ?').bind(tfid, newId).run();
+        let tfid;
+        let attempts = 0;
+        while (attempts < 50) {
+          tfid = generateRandomTfid();
+          try {
+            await env.B1.prepare('UPDATE users SET tfid = ? WHERE id = ?').bind(tfid, newId).run();
+            break;
+          } catch (e) {
+            if (e.message.includes('UNIQUE constraint failed: users.tfid')) {
+              attempts++;
+              continue;
+            }
+            throw e;
+          }
+        }
+        if (attempts >= 50) return new Response(JSON.stringify({ success: false, error: 'Unable to generate unique tfid' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
         const { results } = await env.B1.prepare('SELECT * FROM users WHERE id = ?').bind(newId).all();
-        return new Response(JSON.stringify(stripSensitive(results[0])), {
+        const user = stripSensitive(results[0]);
+        return new Response(JSON.stringify({ success: true, tfid, user }), {
           status: 201,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
@@ -125,18 +147,18 @@ export default {
       if (path === '/subscribe' && method === 'POST') {
         const body = await request.json();
         const { tfid, subscription } = body;
-        if (!tfid || !subscription) return new Response('Missing tfid or subscription', { status: 400, headers: corsHeaders });
+        if (!tfid || !subscription) return new Response(JSON.stringify({ success: false, error: 'Missing tfid or subscription' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         const { changes } = await env.B1.prepare(`
           UPDATE users SET push_subscription = ? WHERE tfid = ?
         `).bind(JSON.stringify(subscription), tfid).run();
-        if (changes === 0) return new Response('User not found', { status: 404, headers: corsHeaders });
+        if (changes === 0) return new Response(JSON.stringify({ success: false, error: 'User not found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         return new Response('Subscription updated', { status: 200, headers: corsHeaders });
       }
 
       if (path === '/messages' && method === 'POST') {
         const body = await request.json();
         const { user1_tfid, user2_tfid } = body;
-        if (!user1_tfid || !user2_tfid) return new Response('Missing tfids', { status: 400, headers: corsHeaders });
+        if (!user1_tfid || !user2_tfid) return new Response(JSON.stringify({ success: false, error: 'Missing tfids' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         const chat_id = getChatId(user1_tfid, user2_tfid);
         const { results } = await env.B1.prepare(`
           SELECT * FROM messages WHERE chat_id = ? ORDER BY time ASC
@@ -149,7 +171,7 @@ export default {
       if (path === '/send' && method === 'POST') {
         const body = await request.json();
         const { sender_tfid, receiver_tfid, message } = body;
-        if (!sender_tfid || !receiver_tfid || !message) return new Response('Missing fields', { status: 400, headers: corsHeaders });
+        if (!sender_tfid || !receiver_tfid || !message) return new Response(JSON.stringify({ success: false, error: 'Missing fields' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         const chat_id = getChatId(sender_tfid, receiver_tfid);
         const time = new Date().toISOString();
         await env.B1.prepare(`
@@ -162,7 +184,7 @@ export default {
       if (path === '/mark-read' && method === 'POST') {
         const body = await request.json();
         const { sender_tfid, receiver_tfid } = body;
-        if (!sender_tfid || !receiver_tfid) return new Response('Missing tfids', { status: 400, headers: corsHeaders });
+        if (!sender_tfid || !receiver_tfid) return new Response(JSON.stringify({ success: false, error: 'Missing tfids' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         const chat_id = getChatId(sender_tfid, receiver_tfid);
         const { changes } = await env.B1.prepare(`
           UPDATE messages SET is_read = 1 WHERE chat_id = ? AND from_tfid = ? AND is_read = 0
@@ -174,7 +196,7 @@ export default {
 
       return new Response('Endpoint not found', { status: 404, headers: corsHeaders });
     } catch (err) {
-      return new Response('Error: ' + err.message, { status: 500, headers: corsHeaders });
+      return new Response(JSON.stringify({ success: false, error: err.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
   }
-}
+};
