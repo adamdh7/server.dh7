@@ -47,12 +47,12 @@ export default {
         return sorted.join('-');
       };
 
-      const stripPassword = (user) => {
+      const stripSensitive = (user) => {
         if (user) delete user.password;
         return user;
       };
 
-      const stripPasswords = (users) => {
+      const stripSensitiveArray = (users) => {
         return users.map(u => {
           delete u.password;
           return u;
@@ -62,12 +62,12 @@ export default {
       if (path === '/login' && method === 'POST') {
         const body = await request.json();
         const { identifier, password } = body;
-        if (!identifier || !password) return new Response('Missing fields', { status: 400, headers: corsHeaders });
+        if (!identifier || !password) return new Response('Missing identifier or password', { status: 400, headers: corsHeaders });
         const { results } = await env.B1.prepare(`
           SELECT * FROM users WHERE (tfid = ? OR dh7 = ?) AND password = ?
         `).bind(identifier, identifier, password).all();
         if (results.length === 0) return new Response('Invalid credentials', { status: 401, headers: corsHeaders });
-        return new Response(JSON.stringify(stripPassword(results[0])), {
+        return new Response(JSON.stringify(stripSensitive(results[0])), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
@@ -77,12 +77,17 @@ export default {
         const { nom, prenom, dh7, age, password } = body;
         if (!nom || !prenom || !dh7 || !age || !password) return new Response('Missing fields', { status: 400, headers: corsHeaders });
         const tfid = crypto.randomUUID();
-        await env.B1.prepare(`
-          INSERT INTO users (tfid, dh7, nom, prenom, age, password, type, org_url, push_subscription)
-          VALUES (?, ?, ?, ?, ?, ?, 'USER', NULL, NULL)
-        `).bind(tfid, dh7, nom, prenom, age, password).run();
+        try {
+          await env.B1.prepare(`
+            INSERT INTO users (tfid, dh7, nom, prenom, age, password)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `).bind(tfid, dh7, nom, prenom, age, password).run();
+        } catch (e) {
+          if (e.message.includes('UNIQUE')) return new Response('dh7 already exists', { status: 409, headers: corsHeaders });
+          throw e;
+        }
         const { results } = await env.B1.prepare('SELECT * FROM users WHERE tfid = ?').bind(tfid).all();
-        return new Response(JSON.stringify(stripPassword(results[0])), {
+        return new Response(JSON.stringify(stripSensitive(results[0])), {
           status: 201,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
@@ -90,9 +95,20 @@ export default {
 
       if (path === '/users' && method === 'GET') {
         const { results } = await env.B1.prepare('SELECT * FROM users').all();
-        return new Response(JSON.stringify(stripPasswords(results)), {
+        return new Response(JSON.stringify(stripSensitiveArray(results)), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
+      }
+
+      if (path === '/subscribe' && method === 'POST') {
+        const body = await request.json();
+        const { tfid, subscription } = body;
+        if (!tfid || !subscription) return new Response('Missing tfid or subscription', { status: 400, headers: corsHeaders });
+        const { changes } = await env.B1.prepare(`
+          UPDATE users SET push_subscription = ? WHERE tfid = ?
+        `).bind(JSON.stringify(subscription), tfid).run();
+        if (changes === 0) return new Response('User not found', { status: 404, headers: corsHeaders });
+        return new Response('Subscription updated', { status: 200, headers: corsHeaders });
       }
 
       if (path === '/messages' && method === 'POST') {
@@ -127,16 +143,16 @@ export default {
         if (!sender_tfid || !receiver_tfid) return new Response('Missing tfids', { status: 400, headers: corsHeaders });
         const chat_id = getChatId(sender_tfid, receiver_tfid);
         const { changes } = await env.B1.prepare(`
-          UPDATE messages SET is_read = 1 WHERE chat_id = ? AND from_tfid = ?
+          UPDATE messages SET is_read = 1 WHERE chat_id = ? AND from_tfid = ? AND is_read = 0
         `).bind(chat_id, sender_tfid).run();
-        return new Response(JSON.stringify({ updated: changes }), {
+        return new Response(JSON.stringify({ marked_as_read: changes }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
       return new Response('Endpoint not found', { status: 404, headers: corsHeaders });
     } catch (err) {
-      return new Response('Error: ' + err.message, { status: 500, headers: { 'Access-Control-Allow-Origin': '*' } });
+      return new Response('Error: ' + err.message, { status: 500, headers: corsHeaders });
     }
   }
 };
