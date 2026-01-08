@@ -42,6 +42,16 @@ export default {
         return new Response(null, { headers: corsHeaders });
       }
 
+      const origin = request.headers.get('Origin');
+      const allowedHosts = ['teste777.pages.dev', 'adamdh7.org', 'ai.adamdh7.org'];
+      let originHost = null;
+      if (origin) {
+        try {
+          originHost = new URL(origin).hostname;
+        } catch {}
+      }
+      const isAllowedOrigin = !origin || allowedHosts.includes(originHost);
+
       const getChatId = (tfid1, tfid2) => {
         const sorted = [tfid1, tfid2].sort();
         return sorted.join('-');
@@ -73,20 +83,32 @@ export default {
       }
 
       if (path === '/register' && method === 'POST') {
+        if (!isAllowedOrigin) {
+          return new Response('Forbidden: invalid origin', { status: 403, headers: corsHeaders });
+        }
+
         const body = await request.json();
         const { nom, prenom, dh7, age, password } = body;
         if (!nom || !prenom || !dh7 || !age || !password) return new Response('Missing fields', { status: 400, headers: corsHeaders });
-        const tfid = crypto.randomUUID();
+
         try {
           await env.B1.prepare(`
-            INSERT INTO users (tfid, dh7, nom, prenom, age, password)
+            INSERT INTO users (dh7, nom, prenom, age, password, org_url)
             VALUES (?, ?, ?, ?, ?, ?)
-          `).bind(tfid, dh7, nom, prenom, age, password).run();
+          `).bind(dh7, nom, prenom, age, password, origin || null).run();
         } catch (e) {
           if (e.message.includes('UNIQUE')) return new Response('dh7 already exists', { status: 409, headers: corsHeaders });
           throw e;
         }
-        const { results } = await env.B1.prepare('SELECT * FROM users WHERE tfid = ?').bind(tfid).all();
+
+        const { results: idResults } = await env.B1.prepare('SELECT last_insert_rowid() AS new_id').all();
+        const newId = idResults[0].new_id;
+        const numberPart = String(newId).padStart(7, '0');
+        const tfid = `TF-${numberPart}`;
+
+        await env.B1.prepare('UPDATE users SET tfid = ? WHERE id = ?').bind(tfid, newId).run();
+
+        const { results } = await env.B1.prepare('SELECT * FROM users WHERE id = ?').bind(newId).all();
         return new Response(JSON.stringify(stripSensitive(results[0])), {
           status: 201,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -155,4 +177,4 @@ export default {
       return new Response('Error: ' + err.message, { status: 500, headers: corsHeaders });
     }
   }
-};
+}
