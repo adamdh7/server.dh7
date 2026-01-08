@@ -1,0 +1,8 @@
+name = "serverdh7"
+main = "worker.js"
+compatibility_date = "2026-7-01"
+
+[[d1_databases]]
+binding = "B1"
+database_name = "server"
+database_id = "8d15e597-4b2d-4e66-974d-fc49073383fc"
