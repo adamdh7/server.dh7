@@ -43,6 +43,8 @@ export default {
       }
 
       const origin = request.headers.get('Origin') || '';
+      const currentOriginNormalized = origin ? new URL(origin).origin : '';
+
       const allowedHosts = ['teste777.pages.dev', 'adamdh7.org', 'ai.adamdh7.org', 'dh7.adamdh7.org'];
       let originHost = null;
       if (origin) {
@@ -82,8 +84,8 @@ export default {
         return results.length > 0 ? results[0] : null;
       };
 
-      const checkOrgOrigin = (user, currentOrigin) => {
-        if (user.org_url !== null && currentOrigin !== user.org_url) {
+      const checkOrgOrigin = (user) => {
+        if (user.org_url !== null && currentOriginNormalized !== user.org_url) {
           throw new Error('Forbidden: request must originate from registered org_url');
         }
       };
@@ -120,11 +122,13 @@ export default {
         }
         dh7 = username + '@dh7.tf';
 
+        const storedOrgUrl = org_url ? new URL(org_url).origin : (origin ? currentOriginNormalized : null);
+
         try {
           await env.B1.prepare(`
             INSERT INTO users (dh7, nom, prenom, age, password, org_url)
             VALUES (?, ?, ?, ?, ?, ?)
-          `).bind(dh7, nom, prenom, age, password, org_url || null).run();
+          `).bind(dh7, nom, prenom, age, password, storedOrgUrl).run();
         } catch (e) {
           if (e.message.includes('UNIQUE')) return new Response(JSON.stringify({ success: false, error: 'dh7 already exists' }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
           throw e;
@@ -171,7 +175,7 @@ export default {
         if (!user1_tfid || !user2_tfid) return new Response(JSON.stringify({ success: false, error: 'Missing tfids' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         const user = await getUserByTfid(user1_tfid);
         if (!user) return new Response(JSON.stringify({ success: false, error: 'Invalid tfid' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        checkOrgOrigin(user, origin);
+        checkOrgOrigin(user);
         const chat_id = getChatId(user1_tfid, user2_tfid);
         const { results } = await env.B1.prepare(`
           SELECT id, chat_id, from_tfid AS "from", text, time, is_read AS read FROM messages WHERE chat_id = ? ORDER BY time ASC
@@ -187,7 +191,7 @@ export default {
         if (!sender_tfid || !receiver_tfid || !message) return new Response(JSON.stringify({ success: false, error: 'Missing fields' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         const user = await getUserByTfid(sender_tfid);
         if (!user) return new Response(JSON.stringify({ success: false, error: 'Invalid sender tfid' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        checkOrgOrigin(user, origin);
+        checkOrgOrigin(user);
         const chat_id = getChatId(sender_tfid, receiver_tfid);
         const time = new Date().toISOString();
         await env.B1.prepare(`
@@ -204,7 +208,7 @@ export default {
         const user = await getUserByTfid(receiver_tfid);
         if (!user) return new Response(JSON.stringify({ success: false, error: 'Invalid receiver tfid' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         if (user.org_url !== null) return new Response(JSON.stringify({ success: false, error: 'Operation not allowed for org users' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        checkOrgOrigin(user, origin);
+        checkOrgOrigin(user);
         const chat_id = getChatId(sender_tfid, receiver_tfid);
         await env.B1.prepare(`
           UPDATE messages SET is_read = 1 WHERE chat_id = ? AND from_tfid = ? AND is_read = 0
