@@ -94,7 +94,7 @@ export default {
         return blankResponse;
       }
 
-      const allowedOriginHosts = new Set(['teste777.pages.dev', 'adamdh7.org', 'ai.adamdh7.org', 'dh7.adamdh7.org']);
+      const allowedOriginHosts = new Set(['teste777.pages.dev', 'adamdh7.org', 'sou.adamdh7.org', 'ai.adamdh7.org', 'dh7.adamdh7.org']);
       const isMainOriginAllowed = allowedOriginHosts.has(originHost);
 
       const isOriginAllowedForUser = (user) => {
