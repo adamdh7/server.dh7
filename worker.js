@@ -35,7 +35,8 @@ export default {
         'adamdh7.org',
         'sou.adamdh7.org',
         'ai.adamdh7.org',
-        'dh7.adamdh7.org'
+        'dh7.adamdh7.org',
+        'server.dh7.adamdh7.org'
       ]);
 
       if (!allowedOriginHosts.has(originHost)) {
@@ -53,11 +54,9 @@ export default {
       }
 
       const generateRandomTfid = () => {
-        let num = Math.floor(Math.random() * 4782969); // 9^7 possibilités
         let number = '';
         for (let i = 0; i < 7; i++) {
-          number = (num % 9 + 1) + number; // prépend pour uniformité
-          num = Math.floor(num / 9);
+          number += Math.floor(Math.random() * 9) + 1;
         }
         return `TF-${number}`;
       };
@@ -107,31 +106,16 @@ export default {
         }
 
         let attempts = 0;
-        let user;
+        let tfid;
 
         while (attempts < 50) {
-          const tfid = generateRandomTfid();
+          tfid = generateRandomTfid();
 
           try {
             await env.B1.prepare(`
               INSERT INTO users (dh7, nom, prenom, age, password, tfid)
               VALUES (?, ?, ?, ?, ?, ?)
             `).bind(dh7, nom, prenom, age, password, tfid).run();
-
-            const { results: idResults } = await env.B1.prepare(
-              'SELECT last_insert_rowid() AS id'
-            ).all();
-
-            const newId = idResults[0].id;
-
-            user = {
-              id: newId,
-              nom,
-              prenom,
-              dh7,
-              age,
-              tfid
-            };
 
             break;
           } catch (e) {
@@ -150,7 +134,7 @@ export default {
           return createJsonResponse({ success: false, error: 'Unable to generate unique tfid' }, 500);
         }
 
-        return createJsonResponse({ success: true, user }, 201);
+        return createJsonResponse({ success: true, tfid }, 201);
       }
 
       return createBlankResponse();
