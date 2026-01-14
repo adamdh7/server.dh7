@@ -130,7 +130,7 @@ export default {
 
         let tfid;
         let attempts = 0;
-        while (attempts < 7) {
+        while (attempts < 50) {
           tfid = generateRandomTfid();
           try {
             await env.B1.prepare('UPDATE users SET tfid = ? WHERE id = ?').bind(tfid, newId).run();
