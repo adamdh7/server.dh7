@@ -32,6 +32,7 @@ export default {
 
       const allowedOriginHosts = new Set([
         'teste777.pages.dev',
+        'v7test.pages.dev',
         'adamdh7.org',
         'sou.adamdh7.org',
         'ai.adamdh7.org',
