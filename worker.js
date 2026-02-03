@@ -36,6 +36,7 @@ export default {
         'sou.adamdh7.org',
         'ai.adamdh7.org',
         'dh7.adamdh7.org',
+        'quiz.adamdh7.org',
         'server.dh7.adamdh7.org'
       ]);
 
