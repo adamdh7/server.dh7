@@ -63,6 +63,27 @@ export default {
         return `TF-${number}`;
       };
 
+      if (path === '/search' && method === 'POST') {
+        const body = await request.json().catch(() => null);
+        if (body === null) {
+          return createBlankResponse();
+        }
+
+        const { query } = body;
+        if (!query) {
+          return createJsonResponse({ success: false, error: 'Missing query' }, 400);
+        }
+
+        const searchTerm = `%${query}%`;
+        const { results } = await env.B1.prepare(`
+          SELECT id, nom, prenom, dh7, age, tfid
+          FROM users
+          WHERE tfid LIKE ? OR dh7 LIKE ?
+        `).bind(searchTerm, searchTerm).all();
+
+        return createJsonResponse({ success: true, results });
+      }
+
       if (path === '/login' && method === 'POST') {
         const body = await request.json().catch(() => null);
         if (body === null) {
