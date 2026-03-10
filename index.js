@@ -110,26 +110,37 @@ function isBrowserUserAgent(ua) {
 
 async function verifyCaller(req, res, next) {
   const originHeader = req.headers.origin || req.headers.referer || null;
+  const token = req.headers['x-worker-token'] || '';
+  const callerHost = (req.headers['x-caller-host'] || '').toLowerCase();
+  const ua = req.headers['user-agent'] || '';
+
+  req.isWorker = false;
+
+  if (token && WORKER_TOKEN && token === WORKER_TOKEN && ALLOWED_HOSTS.has(callerHost)) {
+    req.isWorker = true;
+    return next();
+  }
+
+  if (req.path === '/sync') {
+    return res.status(403).json({ success: false, error: 'Accès strict travailleur requis' });
+  }
+
   if (originHeader) {
     try {
       const normalized = (new URL(originHeader)).origin;
       if (!ALLOWED_ORIGINS.has(normalized)) {
         return res.status(403).json({ success: false, error: 'Origin non autorisé' });
       }
+      return next();
     } catch (e) {
       return res.status(400).json({ success: false, error: 'Origin invalide' });
     }
-    return next();
   }
-  const token = req.headers['x-worker-token'] || '';
-  const callerHost = (req.headers['x-caller-host'] || '').toLowerCase();
-  const ua = req.headers['user-agent'] || '';
-  if (isBrowserUserAgent(ua) && !token) {
+
+  if (isBrowserUserAgent(ua)) {
     return res.status(403).json({ success: false, error: 'Accès navigateur non autorisé' });
   }
-  if (token && token === WORKER_TOKEN && ALLOWED_HOSTS.has(callerHost)) {
-    return next();
-  }
+
   return res.status(403).json({ success: false, error: 'Appel non autorisé' });
 }
 
@@ -246,7 +257,7 @@ app.get('/get/:page', async (req, res) => {
   const users = await fs.readJson(USERS_FILE);
   const start = (page - 1) * limit;
   const end = page * limit;
-  const batch = users.slice(start, end).map(sanitizeUser);
+  const batch = users.slice(start, end).map(u => req.isWorker ? u : sanitizeUser(u));
   const hasMore = users.length > end;
   res.json({
     batch,
@@ -256,21 +267,36 @@ app.get('/get/:page', async (req, res) => {
 
 app.post('/sync', async (req, res) => {
   const { users: incomingUsers, messages: incomingMsgs } = req.body;
-  if (incomingUsers) {
+  if (incomingUsers && Array.isArray(incomingUsers)) {
     const localUsers = await fs.readJson(USERS_FILE);
+    const localUsersMap = new Map(localUsers.map(u => [u.tfid, u]));
+    let usersModified = false;
     incomingUsers.forEach(u => {
-      if (!localUsers.find(lu => lu.tfid === u.tfid)) localUsers.push(u);
+      if (!localUsersMap.has(u.tfid)) {
+        localUsers.push(u);
+        usersModified = true;
+      }
     });
-    await fs.writeJson(USERS_FILE, localUsers);
+    if (usersModified) {
+      await fs.writeJson(USERS_FILE, localUsers);
+    }
   }
-  if (incomingMsgs) {
+  if (incomingMsgs && Array.isArray(incomingMsgs)) {
     const localMsgs = await fs.readJson(MSGS_FILE);
+    const localMsgsSet = new Set(localMsgs.map(m => `${m.time}-${m.from}`));
+    let msgsModified = false;
     incomingMsgs.forEach(m => {
-      if (!localMsgs.find(lm => lm.time === m.time && lm.from === m.from)) localMsgs.push(m);
+      const key = `${m.time}-${m.from}`;
+      if (!localMsgsSet.has(key)) {
+        localMsgs.push(m);
+        msgsModified = true;
+      }
     });
-    await fs.writeJson(MSGS_FILE, localMsgs);
-    await cleanupOldMessages();
-    await checkStorageLimit();
+    if (msgsModified) {
+      await fs.writeJson(MSGS_FILE, localMsgs);
+      await cleanupOldMessages();
+      await checkStorageLimit();
+    }
   }
   res.json({ success: true });
 });
