@@ -11,8 +11,8 @@ const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const MSGS_FILE = path.join(DATA_DIR, 'messages.json');
 
-const ALLOWED_ORIGINS = new Set(['https://dh7.adamdh7.org', 'https://www.adamdh7.org']);
-const ALLOWED_HOSTS = new Set(['dh7.adamdh7.org', 'www.adamdh7.org']);
+const ALLOWED_ORIGINS = new Set(['https://dh7.adamdh7.org', 'https://dh7test.pages.dev', 'https://www.adamdh7.org']);
+const ALLOWED_HOSTS = new Set(['dh7.adamdh7.org', 'dh7test.pages.dev', 'www.adamdh7.org']);
 const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
 
 app.use(bodyParser.json());
