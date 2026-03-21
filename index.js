@@ -1,308 +1,382 @@
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const fs = require('fs-extra');
-const path = require('path');
+import express from "express";
+import Database from "better-sqlite3";
+import fs from "fs";
+import path from "path";
 
 const app = express();
+app.use(express.json());
+
+const dataDir = path.join(process.cwd(), "data");
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const db = new Database(path.join(dataDir, "quiz_data.sqlite"));
+
+db.exec("CREATE TABLE IF NOT EXISTS user_progress (session_id TEXT PRIMARY KEY, language TEXT, current_step INTEGER, consecutive_correct INTEGER)");
+db.exec("CREATE TABLE IF NOT EXISTS used_persons (session_id TEXT, person_name TEXT)");
+db.exec("CREATE TABLE IF NOT EXISTS current_quiz (session_id TEXT PRIMARY KEY, q_type TEXT, question TEXT, options TEXT, image_url TEXT, answer TEXT, explanation TEXT)");
+db.exec("CREATE TABLE IF NOT EXISTS used_questions (session_id TEXT, question TEXT)");
+
+const cfAccountId = process.env.CF_ACCOUNT_ID || "REPLACE_WITH_YOUR_ACCOUNT_ID";
+const cfToken = process.env.CF_TOKEN || "cfut_PkxDXlTK6zC6iAaDG2jtZj73oOB5f2HBKDrQ0Pxb073c4bf5";
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const authHeader = req.headers.authorization;
+  
+  let isAllowed = false;
+  let allowedOrigin = "*";
+
+  if (origin && origin.endsWith(".adamdh7.org")) {
+    isAllowed = true;
+    allowedOrigin = origin;
+  } else if (authHeader === "Bearer adamdh7") {
+    isAllowed = true;
+    if (origin) {
+      allowedOrigin = origin;
+    }
+  }
+
+  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (!isAllowed) {
+    return res.status(403).json({ error: "Forbidden: Origin or Token not allowed" });
+  }
+
+  next();
+});
+
+app.get("/local-image/:filename", (req, res) => {
+  const filePath = path.join(dataDir, req.params.filename);
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).send("Image Not Found");
+  }
+});
+
+async function runAI(messages, max_tokens) {
+  const aiUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/meta/llama-3.2-3b-instruct`;
+  const aiResponse = await fetch(aiUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${cfToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ messages, max_tokens })
+  });
+  const aiJson = await aiResponse.json();
+  if (aiJson.success && aiJson.result) {
+    return aiJson.result;
+  }
+  throw new Error("AI Request Failed");
+}
+
+app.post("/quizz", async (req, res) => {
+  try {
+    const body = req.body;
+    const session_id = body.session_id?.trim();
+    if (!session_id) return res.status(400).json({ error: "session_id required" });
+
+    const rawLang = body.lang?.trim();
+    let lang = rawLang ? rawLang.toLowerCase() : null;
+    const incomingLevel = body.level;
+
+    let progress = db.prepare("SELECT * FROM user_progress WHERE session_id = ?").get(session_id);
+
+    if (!progress) {
+      const default_lang = lang || "en";
+      const start_step = incomingLevel || 1;
+      db.prepare("INSERT INTO user_progress (session_id, language, current_step, consecutive_correct) VALUES (?, ?, ?, 0)").run(session_id, default_lang, start_step);
+      progress = { language: default_lang, current_step: start_step, consecutive_correct: 0 };
+    } else {
+      let updated = false;
+      if (lang && lang !== progress.language) {
+        progress.language = lang;
+        updated = true;
+      }
+      if (incomingLevel !== undefined && incomingLevel !== progress.current_step) {
+        progress.current_step = incomingLevel;
+        updated = true;
+      }
+      if (updated) {
+        db.prepare("UPDATE user_progress SET language = ?, current_step = ? WHERE session_id = ?").run(progress.language, progress.current_step, session_id);
+      }
+    }
+
+    const current_step_num = progress.current_step;
+    const language = progress.language;
+
+    const langName = {
+      en: "English",
+      fr: "French",
+      es: "Spanish",
+      ht: "Haitian Creole"
+    }[language] || "English";
+
+    const questionTypes = ["MCQ", "TRUE_FALSE", "FILL_BLANK", "IDENTITY_IMAGE"];
+    const randomType = questionTypes[Math.floor(Math.random() * questionTypes.length)];
+
+    const quizData = {
+      current_step: current_step_num,
+      consecutive_correct: progress.consecutive_correct,
+      language: progress.language,
+      needed_for_next_level: Math.max(0, 7 - progress.consecutive_correct)
+    };
+
+    if (randomType === "IDENTITY_IMAGE") {
+      const usedRes = db.prepare("SELECT person_name FROM used_persons WHERE session_id = ?").all(session_id);
+      const usedList = usedRes.map(r => r.person_name);
+
+      let personName = "Albert Einstein";
+      
+      const personPrompt = `Generate a JSON array of 5 globally famous historical figures. Exclude: ${usedList.join(", ")}. Format: ["Name1", "Name2", "Name3", "Name4", "Name5"]. NO EXTRA TEXT.`;
+
+      try {
+        const nameResp = await runAI([
+          { role: "system", content: "You output strict JSON arrays." },
+          { role: "user", content: personPrompt }
+        ], 300);
+
+        let candidates = [];
+        const raw = nameResp.response || "";
+        const arrayMatch = raw.match(/\[[\s\S]*\]/);
+        
+        if (arrayMatch) {
+          candidates = JSON.parse(arrayMatch[0]);
+          if (Array.isArray(candidates)) {
+             for (const name of candidates) {
+                if (!usedList.includes(name)) {
+                   personName = name;
+                   break;
+                }
+             }
+          }
+        }
+      } catch(e) {}
+
+      const imagePrompt = `Professional portrait of ${personName}, realistic, 8k, studio lighting`;
+      
+      const extImgResponse = await fetch("https://server4.adamdh7.org/jerere", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: imagePrompt })
+      });
+
+      if (!extImgResponse.ok) {
+         return res.status(500).json({ error: "External image generation failed" });
+      }
+
+      const imgJson = await extImgResponse.json();
+      const generatedImageUrl = imgJson.url;
+
+      const imgDataRes = await fetch(generatedImageUrl);
+      const arrayBuffer = await imgDataRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      const randomDigits = Math.floor(1000000 + Math.random() * 9000000);
+      const filename = `TF-${randomDigits}.jpg`;
+      const filePath = path.join(dataDir, filename);
+
+      fs.writeFileSync(filePath, buffer);
+
+      let imageUrl = `/local-image/${filename}`;
+
+      try {
+        const formData = new FormData();
+        const blob = new Blob([arrayBuffer], { type: "image/jpeg" });
+        formData.append("file", blob, filename);
+
+        const uploadApiUrl = process.env.UPLOAD_API_URL || "https://v1bref.onrender.com/upload";
+        const uploadRes = await fetch(uploadApiUrl, {
+          method: "POST",
+          body: formData
+        });
+        
+        const textRes = await uploadRes.text();
+        try {
+          const jsonRes = JSON.parse(textRes);
+          if (jsonRes.url) {
+            imageUrl = jsonRes.url;
+          } else if (jsonRes.fileUrl) {
+            imageUrl = jsonRes.fileUrl;
+          }
+        } catch (parseError) {
+          if (textRes.startsWith("http")) {
+            imageUrl = textRes.trim();
+          }
+        }
+      } catch (uploadError) {}
+
+      db.prepare("INSERT INTO used_persons (session_id, person_name) VALUES (?, ?)").run(session_id, personName);
+
+      const questionTexts = {
+        en: "Who is this person?",
+        fr: "Qui est cette personne ?",
+        es: "¿Quién es esta persona?",
+        ht: "Kiyès moun sa a ye?"
+      };
+
+      let questionText = questionTexts[language] || questionTexts.en;
+
+      db.prepare("REPLACE INTO current_quiz (session_id, q_type, question, options, image_url, answer, explanation) VALUES (?, ?, ?, NULL, ?, ?, NULL)").run(session_id, randomType, questionText, imageUrl, personName);
+
+      quizData.type = randomType;
+      quizData.question = questionText;
+      quizData.image_url = imageUrl;
+
+    } else {
+      
+      const usedQRes = db.prepare("SELECT question FROM used_questions WHERE session_id = ? ORDER BY rowid DESC LIMIT 10").all(session_id);
+      const usedQList = usedQRes.map(r => r.question).join(" | ");
+
+      const systemPrompt = `Task: Create ONE unique quiz question. Topic: Random. Lang: ${langName}. Level: ${current_step_num}. Type: ${randomType}. Do NOT repeat these questions: ${usedQList}. Output STRICT JSON format: { "question": "text", "options": ["opt1","opt2"], "answer": "text", "explanation": "text" }. No markdown, no extra text.`;
+
+      let parsed = null;
+      try {
+        const aiResponse = await runAI([
+          { role: "system", content: "You are a strict JSON quiz generator." },
+          { role: "user", content: systemPrompt }
+        ], 1000);
+
+        const rawResponse = aiResponse.response || "";
+        const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+        
+        if (jsonMatch) {
+          parsed = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error("No JSON structure found");
+        }
+      } catch (e) {
+        parsed = {
+          question: "Error generating question.",
+          options: null,
+          answer: "Error",
+          explanation: ""
+        };
+      }
+
+      const optionsStr = parsed.options ? JSON.stringify(parsed.options) : null;
+
+      db.prepare("REPLACE INTO current_quiz (session_id, q_type, question, options, image_url, answer, explanation) VALUES (?, ?, ?, ?, NULL, ?, ?)").run(session_id, randomType, parsed.question, optionsStr, parsed.answer, parsed.explanation || null);
+      db.prepare("INSERT INTO used_questions (session_id, question) VALUES (?, ?)").run(session_id, parsed.question);
+
+      quizData.type = randomType;
+      quizData.question = parsed.question;
+      if (parsed.options) quizData.options = parsed.options;
+    }
+
+    return res.json(quizData);
+  } catch (e) {
+    res.status(500).json({ error: "Internal Server Error", message: e.message });
+  }
+});
+
+app.post("/validate", async (req, res) => {
+  try {
+    const body = req.body;
+    const session_id = body.session_id?.trim();
+    const user_answer = body.user_answer?.trim() || "";
+    if (!session_id || !user_answer) return res.status(400).json({ error: "session_id and user_answer required" });
+
+    const current = db.prepare("SELECT * FROM current_quiz WHERE session_id = ?").get(session_id);
+    if (!current) return res.status(400).json({ error: "No active quiz" });
+
+    let progress = db.prepare("SELECT * FROM user_progress WHERE session_id = ?").get(session_id);
+    if (!progress) {
+      progress = { language: "en", current_step: 1, consecutive_correct: 0 };
+    }
+
+    const langName = {
+      en: "English",
+      fr: "French",
+      es: "Spanish",
+      ht: "Haitian Creole"
+    }[progress.language] || "English";
+
+    const judgePrompt = `Validate the user answer. Question: "${current.question}". Correct Answer: "${current.answer}". User Answer: "${user_answer}". Output STRICT JSON: {"correct": true, "explanation": "Short feedback in ${langName}"}`;
+
+    let judgeResult = { correct: false, explanation: "" };
+    try {
+      const judgeResp = await runAI([
+        { role: "system", content: "You output strictly JSON." },
+        { role: "user", content: judgePrompt }
+      ], 700);
+
+      const text = judgeResp.response || "";
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      
+      if (jsonMatch) {
+        judgeResult = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("No JSON structure found");
+      }
+    } catch (e) {
+       judgeResult = { correct: false, explanation: "Validation error." };
+    }
+
+    const isCorrect = !!judgeResult.correct;
+    const explanation = judgeResult.explanation || (isCorrect ? "Correct!" : `Incorrect. Answer: ${current.answer}`);
+
+    let new_consec = progress.consecutive_correct;
+    let new_step = progress.current_step;
+
+    if (isCorrect) {
+      new_consec += 1;
+      if (new_consec >= 7) {
+        new_step += 1;
+        new_consec = 0;
+      }
+      db.prepare("DELETE FROM current_quiz WHERE session_id = ?").run(session_id);
+    } else {
+      new_consec = 0;
+    }
+
+    db.prepare("UPDATE user_progress SET consecutive_correct = ?, current_step = ? WHERE session_id = ?").run(new_consec, new_step, session_id);
+
+    return res.json({
+      correct: isCorrect,
+      explanation: explanation,
+      consecutive_correct: new_consec,
+      needed_for_next_level: Math.max(0, 7 - new_consec),
+      current_step: new_step,
+      language: progress.language
+    });
+  } catch (e) {
+    res.status(500).json({ error: "Internal Server Error", message: e.message });
+  }
+});
+
+app.get("/step", async (req, res) => {
+  try {
+    const session_id = req.query.session_id;
+    if (!session_id) return res.status(400).json({ error: "session_id required" });
+
+    let progress = db.prepare("SELECT * FROM user_progress WHERE session_id = ?").get(session_id);
+    if (!progress) {
+      db.prepare("INSERT INTO user_progress (session_id, language, current_step, consecutive_correct) VALUES (?, 'en', 1, 0)").run(session_id);
+      progress = { language: "en", current_step: 1, consecutive_correct: 0 };
+    }
+
+    return res.json({
+      language: progress.language,
+      current_step: progress.current_step,
+      consecutive_correct: progress.consecutive_correct,
+      needed_for_next_level: Math.max(0, 7 - progress.consecutive_correct)
+    });
+  } catch (e) {
+    res.status(500).json({ error: "Internal Server Error", message: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
-
-const DATA_DIR = path.join(__dirname, 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const MSGS_FILE = path.join(DATA_DIR, 'messages.json');
-
-const ALLOWED_ORIGINS = new Set(['https://dh7.dh7.adamdh7.org', 'https://dh7.adamdh7.org', 'https://quiz.adamdh7.org', 'https://dh7test.pages.dev', 'https://www.adamdh7.org']);
-const ALLOWED_HOSTS = new Set(['dh7.adamdh7.org', 'quiz.pages.dev', 'dh7test.pages.dev', 'www.adamdh7.org']);
-const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
-
-app.use(bodyParser.json());
-
-const corsOptions = {
-  origin: function(origin, callback) {
-    if (!origin) return callback(null, false);
-    try {
-      const normalized = (new URL(origin)).origin;
-      if (ALLOWED_ORIGINS.has(normalized)) return callback(null, true);
-      return callback(new Error('Origin non autorisé'), false);
-    } catch (e) {
-      return callback(new Error('Origin invalide'), false);
-    }
-  },
-  optionsSuccessStatus: 204
-};
-app.use(cors(corsOptions));
-
-async function initStorage() {
-  await fs.ensureDir(DATA_DIR);
-  if (!(await fs.pathExists(USERS_FILE))) await fs.writeJson(USERS_FILE, []);
-  if (!(await fs.pathExists(MSGS_FILE))) await fs.writeJson(MSGS_FILE, []);
-}
-
-function sanitizeUser(u) {
-  const { password, ...rest } = u || {};
-  return rest;
-}
-
-async function getDirectorySize(dir) {
-  let total = 0;
-  const items = await fs.readdir(dir);
-  for (const item of items) {
-    const full = path.join(dir, item);
-    const stat = await fs.stat(full);
-    if (stat.isFile()) total += stat.size;
-    else if (stat.isDirectory()) total += await getDirectorySize(full);
-  }
-  return total;
-}
-
-async function purgeNonUserData() {
-  await fs.writeJson(MSGS_FILE, []);
-  const files = await fs.readdir(DATA_DIR);
-  for (const f of files) {
-    const full = path.join(DATA_DIR, f);
-    if (full === USERS_FILE) continue;
-    if (full === MSGS_FILE) continue;
-    try {
-      const stat = await fs.stat(full);
-      if (stat.isFile()) await fs.remove(full);
-      else if (stat.isDirectory()) await fs.remove(full);
-    } catch (e) {
-    }
-  }
-}
-
-async function checkStorageLimit() {
-  try {
-    const size = await getDirectorySize(DATA_DIR);
-    const limit = 400 * 1024 * 1024;
-    if (size > limit) {
-      await purgeNonUserData();
-    }
-  } catch (e) {
-  }
-}
-
-async function cleanupOldMessages() {
-  try {
-    const msgs = await fs.readJson(MSGS_FILE);
-    const now = Date.now();
-    const sevenDays = 7 * 24 * 60 * 60 * 1000;
-    const kept = msgs.filter(m => {
-      const t = Date.parse(m.time || '');
-      if (isNaN(t)) return false;
-      return now - t < sevenDays;
-    });
-    await fs.writeJson(MSGS_FILE, kept);
-  } catch (e) {
-  }
-}
-
-async function ensureStorageHealth() {
-  await initStorage();
-  await cleanupOldMessages();
-  await checkStorageLimit();
-}
-
-function isBrowserUserAgent(ua) {
-  if (!ua) return false;
-  return /Mozilla|Chrome|Safari|Firefox|Edge|Opera/i.test(ua);
-}
-
-async function verifyCaller(req, res, next) {
-  const originHeader = req.headers.origin || req.headers.referer || null;
-  const token = req.headers['x-worker-token'] || '';
-  const callerHost = (req.headers['x-caller-host'] || '').toLowerCase();
-  const ua = req.headers['user-agent'] || '';
-
-  req.isWorker = false;
-
-  if (token && WORKER_TOKEN && token === WORKER_TOKEN && ALLOWED_HOSTS.has(callerHost)) {
-    req.isWorker = true;
-    return next();
-  }
-
-  if (req.path === '/sync') {
-    return res.status(403).json({ success: false, error: 'Accès strict travailleur requis' });
-  }
-
-  if (originHeader) {
-    try {
-      const normalized = (new URL(originHeader)).origin;
-      if (!ALLOWED_ORIGINS.has(normalized)) {
-        return res.status(403).json({ success: false, error: 'Origin non autorisé' });
-      }
-      return next();
-    } catch (e) {
-      return res.status(400).json({ success: false, error: 'Origin invalide' });
-    }
-  }
-
-  if (isBrowserUserAgent(ua)) {
-    return res.status(403).json({ success: false, error: 'Accès navigateur non autorisé' });
-  }
-
-  return res.status(403).json({ success: false, error: 'Appel non autorisé' });
-}
-
-app.use(verifyCaller);
-
-app.post('/register', async (req, res) => {
-  const { nom, prenom, dh7, age, password } = req.body;
-  if (!nom || !prenom || !dh7 || !password) {
-    return res.json({ success: false, error: 'Données manquantes' });
-  }
-  const users = await fs.readJson(USERS_FILE);
-  if (users.find(u => u.dh7 === dh7)) {
-    return res.json({ success: false, error: 'ID DH7 déjà utilisé' });
-  }
-  const existingTfids = new Set(users.map(u => u.tfid));
-  let digits = 7;
-  let attempts = 0;
-  function generateTFIDLocal() {
-    while (true) {
-      const maxVal = Math.pow(10, digits);
-      if (existingTfids.size >= maxVal * 0.9) {
-        digits++;
-        continue;
-      }
-      const num = Math.floor(Math.random() * maxVal).toString().padStart(digits, '0');
-      const tfid = `TF-${num}`;
-      if (!existingTfids.has(tfid)) return tfid;
-      attempts++;
-      if (attempts > 1000) digits++;
-    }
-  }
-  const tfid = generateTFIDLocal();
-  const newUser = { tfid, nom, prenom, dh7, age, password };
-  users.push(newUser);
-  await fs.writeJson(USERS_FILE, users);
-  await checkStorageLimit();
-  res.json({ success: true, tfid });
-});
-
-app.post('/login', async (req, res) => {
-  const { identifier, password } = req.body;
-  const users = await fs.readJson(USERS_FILE);
-  const user = users.find(u => (u.tfid === identifier || u.dh7 === identifier) && u.password === password);
-  if (user) {
-    return res.json({ success: true, user: sanitizeUser(user) });
-  }
-  return res.json({ success: false, error: 'Identifiant ou mot de passe incorrect' });
-});
-
-app.get('/users', async (req, res) => {
-  const users = await fs.readJson(USERS_FILE);
-  const safeUsers = users.map(sanitizeUser);
-  res.json(safeUsers);
-});
-
-app.post('/search', async (req, res) => {
-  const { query } = req.body;
-  if (!query) return res.json({ results: [] });
-  const users = await fs.readJson(USERS_FILE);
-  const q = query.toLowerCase();
-  const results = users.filter(u =>
-    (u.nom || '').toLowerCase().includes(q) ||
-    (u.prenom || '').toLowerCase().includes(q) ||
-    (u.dh7 || '').toLowerCase().includes(q) ||
-    (u.tfid || '').toLowerCase().includes(q)
-  );
-  res.json({ results: results.map(sanitizeUser) });
-});
-
-app.post('/messages', async (req, res) => {
-  const { user1_tfid, user2_tfid } = req.body;
-  if (!user1_tfid || !user2_tfid) return res.json([]);
-  const msgs = await fs.readJson(MSGS_FILE);
-  const filtered = msgs.filter(m =>
-    (m.from === user1_tfid && m.to === user2_tfid) ||
-    (m.from === user2_tfid && m.to === user1_tfid)
-  );
-  res.json(filtered);
-});
-
-app.post('/send', async (req, res) => {
-  const { sender_tfid, receiver_tfid, message } = req.body;
-  if (!sender_tfid || !receiver_tfid || !message) {
-    return res.json({ success: false, error: 'Données manquantes' });
-  }
-  const msgs = await fs.readJson(MSGS_FILE);
-  const newMsg = {
-    from: sender_tfid,
-    to: receiver_tfid,
-    text: message,
-    time: new Date().toISOString(),
-    read: false
-  };
-  msgs.push(newMsg);
-  await fs.writeJson(MSGS_FILE, msgs);
-  await cleanupOldMessages();
-  await checkStorageLimit();
-  res.json({ success: true });
-});
-
-app.post('/mark-read', async (req, res) => {
-  const { sender_tfid, receiver_tfid } = req.body;
-  const msgs = await fs.readJson(MSGS_FILE);
-  msgs.forEach(m => {
-    if (m.from === sender_tfid && m.to === receiver_tfid) m.read = true;
-  });
-  await fs.writeJson(MSGS_FILE, msgs);
-  res.json({ success: true });
-});
-
-app.get('/get/:page', async (req, res) => {
-  const page = parseInt(req.params.page) || 1;
-  const limit = 100;
-  const users = await fs.readJson(USERS_FILE);
-  const start = (page - 1) * limit;
-  const end = page * limit;
-  const batch = users.slice(start, end).map(u => req.isWorker ? u : sanitizeUser(u));
-  const hasMore = users.length > end;
-  res.json({
-    batch,
-    has_more: hasMore
-  });
-});
-
-app.post('/sync', async (req, res) => {
-  const { users: incomingUsers, messages: incomingMsgs } = req.body;
-  if (incomingUsers && Array.isArray(incomingUsers)) {
-    const localUsers = await fs.readJson(USERS_FILE);
-    const localUsersMap = new Map(localUsers.map(u => [u.tfid, u]));
-    let usersModified = false;
-    incomingUsers.forEach(u => {
-      if (!localUsersMap.has(u.tfid)) {
-        localUsers.push(u);
-        usersModified = true;
-      }
-    });
-    if (usersModified) {
-      await fs.writeJson(USERS_FILE, localUsers);
-    }
-  }
-  if (incomingMsgs && Array.isArray(incomingMsgs)) {
-    const localMsgs = await fs.readJson(MSGS_FILE);
-    const localMsgsSet = new Set(localMsgs.map(m => `${m.time}-${m.from}`));
-    let msgsModified = false;
-    incomingMsgs.forEach(m => {
-      const key = `${m.time}-${m.from}`;
-      if (!localMsgsSet.has(key)) {
-        localMsgs.push(m);
-        msgsModified = true;
-      }
-    });
-    if (msgsModified) {
-      await fs.writeJson(MSGS_FILE, localMsgs);
-      await cleanupOldMessages();
-      await checkStorageLimit();
-    }
-  }
-  res.json({ success: true });
-});
-
-ensureStorageHealth().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Serveur DH7 actif sur le port ${PORT}`);
-  });
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
