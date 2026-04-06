@@ -36,10 +36,11 @@ mongoose.connect(process.env.MONGO_URI);
 const userSchema = new mongoose.Schema({
   tfid: { type: String, default: '' },
   nom: String,
-  prenom: String,
+  prenom: { type: String, default: '' },
   dh7: String,
   age: String,
-  password: { type: String, default: '' }
+  password: { type: String, default: '' },
+  logo: { type: String, default: '' }
 });
 const User = mongoose.model('User', userSchema);
 
@@ -66,6 +67,18 @@ const upload = multer({ storage: multer.memoryStorage() });
 function sanitizeUser(u) {
   const obj = u.toObject ? u.toObject() : u;
   const { password, ...rest } = obj;
+  
+  if (!rest.logo) {
+    rest.logo = 'https://adamdh7.org/adamdh7.png';
+  }
+  
+  if (rest.age && rest.age.length >= 4) {
+    const birthYear = parseInt(rest.age.substring(0, 4), 10);
+    if (!isNaN(birthYear)) {
+      rest.age = (new Date().getFullYear() - birthYear).toString();
+    }
+  }
+  
   return rest;
 }
 
@@ -111,11 +124,17 @@ async function ensureStorageHealth() {
     await User.create({
       tfid: 'TF-7777777',
       nom: "D'H7",
-      prenom: 'System',
+      prenom: '',
       dh7: 'tfsdh7@dh7.tf',
       age: '0',
-      password: ''
+      password: '',
+      logo: 'https://dh7.adamdh7.org/DH7.png'
     });
+  } else {
+    await User.updateOne(
+      { dh7: 'tfsdh7@dh7.tf' },
+      { $set: { nom: "D'H7", prenom: '', logo: 'https://dh7.adamdh7.org/DH7.png' } }
+    );
   }
 
   const aiUserExists = await User.findOne({ dh7: 'ai.adamdh7@dh7.tf' });
@@ -123,11 +142,17 @@ async function ensureStorageHealth() {
     await User.create({
       tfid: '',
       nom: "AI.Adam_D'H7",
-      prenom: 'AI',
+      prenom: '',
       dh7: 'ai.adamdh7@dh7.tf',
       age: '0',
-      password: ''
+      password: '',
+      logo: 'https://adamdh7.org/adamdh7.png'
     });
+  } else {
+    await User.updateOne(
+      { dh7: 'ai.adamdh7@dh7.tf' },
+      { $set: { logo: 'https://adamdh7.org/adamdh7.png' } }
+    );
   }
 
   await cleanupOldMessages();
@@ -205,7 +230,7 @@ app.post('/register', async (req, res) => {
     if (attempts > 1000) digits++;
   }
 
-  const newUser = new User({ tfid, nom, prenom, dh7, age, password });
+  const newUser = new User({ tfid, nom, prenom, dh7, age, password, logo: '' });
   await newUser.save();
   await checkStorageLimit();
   res.json({ success: true, tfid });
@@ -281,7 +306,11 @@ app.post('/upload-profile', upload.single('image'), async (req, res) => {
       ContentType: file.mimetype
     });
     await s3Client.send(command);
-    res.json({ success: true });
+    
+    const logoUrl = `https://pub-24986ee77a4440dba7c072922c670547.r2.dev/${tfid}`;
+    await User.updateOne({ tfid: tfid }, { $set: { logo: logoUrl } });
+    
+    res.json({ success: true, logo: logoUrl });
   } catch (e) {
     res.json({ success: false, error: 'Erreur upload' });
   }
@@ -291,6 +320,14 @@ app.post('/send', async (req, res) => {
   const { sender_tfid, receiver_tfid, message } = req.body;
   if (!sender_tfid || !receiver_tfid || !message) {
     return res.json({ success: false, error: 'Données manquantes' });
+  }
+
+  const receiverExists = await User.findOne({ 
+    $or: [{ tfid: receiver_tfid }, { dh7: receiver_tfid }] 
+  });
+
+  if (!receiverExists && receiver_tfid !== '') {
+    return res.json({ success: false, error: 'Error !?' });
   }
 
   if (message.startsWith('[Type del-all: ')) {
@@ -323,6 +360,25 @@ app.post('/send', async (req, res) => {
         }
       }
     }
+    return res.json({ success: true });
+  }
+
+  if (receiver_tfid === 'tfsdh7@dh7.tf' || receiver_tfid === 'TF-7777777') {
+    await Message.deleteMany({
+      $or: [
+        { from: sender_tfid, to: receiverExists.tfid || receiverExists.dh7 },
+        { from: receiverExists.tfid || receiverExists.dh7, to: sender_tfid }
+      ]
+    });
+
+    const dh7Reply = new Message({
+      from: receiverExists.tfid || receiverExists.dh7,
+      to: sender_tfid,
+      text: 'Reply no',
+      time: new Date().toISOString(),
+      read: false
+    });
+    await dh7Reply.save();
     return res.json({ success: true });
   }
 
@@ -365,9 +421,13 @@ app.post('/send', async (req, res) => {
 
     const aiPromptMessages = [{ role: 'system', content: 'You are a friendly assistant that helps write stories' }];
     selectedMsgs.forEach(m => {
+      let cleanText = m.text;
+      if (cleanText.startsWith('[Type (<VIEW>)] ')) {
+        cleanText = cleanText.replace('[Type (<VIEW>)] ', '');
+      }
       aiPromptMessages.push({
         role: m.from === sender_tfid ? 'user' : 'assistant',
-        content: m.text.substring(0, 17000)
+        content: cleanText.substring(0, 17000)
       });
     });
 
@@ -378,7 +438,7 @@ app.post('/send', async (req, res) => {
         { headers: { 'Authorization': `Bearer ${process.env.CF_AI_TOKEN}` } }
       );
       
-      const responseText = aiRes.data.result.response;
+      const responseText = "[Type (<VIEW>)] " + aiRes.data.result.response;
       
       const aiReply = new Message({
         from: 'ai.adamdh7@dh7.tf',
@@ -393,7 +453,7 @@ app.post('/send', async (req, res) => {
       const errorReply = new Message({
         from: 'ai.adamdh7@dh7.tf',
         to: sender_tfid,
-        text: "Erreur de communication avec l'IA.",
+        text: "Error !?",
         time: new Date().toISOString(),
         read: false
       });
@@ -473,6 +533,5 @@ app.post('/sync', async (req, res) => {
 
 ensureStorageHealth().then(() => {
   app.listen(PORT, () => {
-    console.log(`Serveur DH7 actif sur le port ${PORT}`);
   });
 });
