@@ -334,6 +334,47 @@ app.post('/upload-profile', upload.single('image'), async (req, res) => {
   }
 });
 
+app.post('/DH7', async (req, res) => {
+  const { user, message } = req.body;
+  if (!user || !message) {
+    return res.json({ success: false, error: 'Données manquantes' });
+  }
+  
+  if (user === 'All') {
+    const allUsers = await User.find({
+      tfid: { $nin: ['TF-7777777', 'TF-4352071'] },
+      dh7: { $nin: ['tfsdh7@dh7.tf', 'ai.adamdh7@dh7.tf'] }
+    });
+    
+    const systemMessages = allUsers.map(u => ({
+      from: 'TF-7777777',
+      to: u.tfid || u.dh7,
+      text: message,
+      time: new Date().toISOString(),
+      read: false
+    }));
+    
+    if (systemMessages.length > 0) {
+      await Message.insertMany(systemMessages);
+    }
+    return res.json({ success: true });
+  } else {
+    const targetUser = await User.findOne({ tfid: user });
+    if (targetUser) {
+      const sysMsg = new Message({
+        from: 'TF-7777777',
+        to: targetUser.tfid,
+        text: message,
+        time: new Date().toISOString(),
+        read: false
+      });
+      await sysMsg.save();
+      return res.json({ success: true });
+    }
+    return res.json({ success: false, error: 'Utilisateur introuvable' });
+  }
+});
+
 app.post('/send', async (req, res) => {
   const { sender_tfid, receiver_tfid, message } = req.body;
   if (!sender_tfid || !receiver_tfid || !message) {
@@ -427,6 +468,9 @@ app.post('/send', async (req, res) => {
       return res.json({ success: false, error: 'Limite depasser' });
     }
 
+    const senderUser = await User.findOne({ tfid: sender_tfid });
+    const userInfo = senderUser ? `Nom: ${senderUser.nom}, Prenom: ${senderUser.prenom}, D'H7: ${senderUser.dh7}, TFID: ${senderUser.tfid}` : 'Inconnu';
+
     const aiMessage = new Message({
       from: sender_tfid,
       to: 'ai.adamdh7@dh7.tf',
@@ -436,78 +480,86 @@ app.post('/send', async (req, res) => {
     });
     await aiMessage.save();
 
-    const pastMsgs = await Message.find({
-      $or: [
-        { from: sender_tfid, to: 'ai.adamdh7@dh7.tf' },
-        { from: 'ai.adamdh7@dh7.tf', to: sender_tfid }
-      ],
-      deletedFor: { $ne: sender_tfid }
-    }).sort({ time: -1 }).limit(10);
-
-    pastMsgs.reverse();
-    
-    let selectedMsgs = [];
-    let totalLength = 0;
-
-    for (let i = pastMsgs.length - 1; i >= 0; i--) {
-      if (pastMsgs[i].text === '[Type (<VIEW>)]') continue;
-      
-      totalLength += pastMsgs[i].text.length;
-      if (selectedMsgs.length < 4) {
-        selectedMsgs.unshift(pastMsgs[i]);
-      } else if (selectedMsgs.length === 4 && totalLength <= 10000) {
-        selectedMsgs.unshift(pastMsgs[i]);
-      }
-    }
-
-    const aiPromptMessages = [{ role: 'system', content: 'You are a friendly assistant that helps write stories' }];
-    selectedMsgs.forEach(m => {
-      aiPromptMessages.push({
-        role: m.from === sender_tfid ? 'user' : 'assistant',
-        content: m.text.substring(0, 17000)
-      });
+    const viewMessage = new Message({
+      from: 'ai.adamdh7@dh7.tf',
+      to: sender_tfid,
+      text: '[Type (<VIEW>)]',
+      time: new Date(Date.now() + 5).toISOString(),
+      read: false
     });
+    await viewMessage.save();
 
-    try {
-      const aiRes = await axios.post(
-        `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/@cf/meta/llama-3-8b-instruct`,
-        { messages: aiPromptMessages },
-        { headers: { 'Authorization': `Bearer ${process.env.CF_AI_TOKEN}` } }
-      );
-      
-      const responseText = aiRes.data.result.response;
-      
-      const viewMessage = new Message({
-        from: 'ai.adamdh7@dh7.tf',
-        to: sender_tfid,
-        text: '[Type (<VIEW>)]',
-        time: new Date().toISOString(),
-        read: false
-      });
-      await viewMessage.save();
-      
-      const aiReply = new Message({
-        from: 'ai.adamdh7@dh7.tf',
-        to: sender_tfid,
-        text: responseText,
-        time: new Date(Date.now() + 10).toISOString(),
-        read: false
-      });
-      await aiReply.save();
-      
-    } catch (e) {
-      const errorReply = new Message({
-        from: 'ai.adamdh7@dh7.tf',
-        to: sender_tfid,
-        text: "Error !?",
-        time: new Date().toISOString(),
-        read: false
-      });
-      await errorReply.save();
-    }
-    
-    await checkStorageLimit();
-    return res.json({ success: true });
+    res.json({ success: true });
+
+    (async () => {
+      try {
+        const pastMsgs = await Message.find({
+          $or: [
+            { from: sender_tfid, to: 'ai.adamdh7@dh7.tf' },
+            { from: 'ai.adamdh7@dh7.tf', to: sender_tfid }
+          ],
+          deletedFor: { $ne: sender_tfid }
+        }).sort({ time: -1 }).limit(10);
+
+        pastMsgs.reverse();
+        
+        let selectedMsgs = [];
+        let totalLength = 0;
+
+        for (let i = pastMsgs.length - 1; i >= 0; i--) {
+          if (pastMsgs[i].text === '[Type (<VIEW>)]') continue;
+          
+          totalLength += pastMsgs[i].text.length;
+          if (selectedMsgs.length < 4) {
+            selectedMsgs.unshift(pastMsgs[i]);
+          } else if (selectedMsgs.length === 4 && totalLength <= 10000) {
+            selectedMsgs.unshift(pastMsgs[i]);
+          }
+        }
+
+        const aiPromptMessages = [{ 
+          role: 'system', 
+          content: `You are Adam_D'H7, D'H7 is a messaging web app like others and you are the AI of their web so users can contact you to ask questions. Answer thanks to what you know about messaging apps and webs, and be brief. The user contacting you is: ${userInfo}` 
+        }];
+        
+        selectedMsgs.forEach(m => {
+          aiPromptMessages.push({
+            role: m.from === sender_tfid ? 'user' : 'assistant',
+            content: m.text.substring(0, 17000)
+          });
+        });
+
+        const aiRes = await axios.post(
+          `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/@cf/meta/llama-3-8b-instruct`,
+          { messages: aiPromptMessages },
+          { headers: { 'Authorization': `Bearer ${process.env.CF_AI_TOKEN}` } }
+        );
+        
+        const responseText = aiRes.data.result.response;
+        
+        const aiReply = new Message({
+          from: 'ai.adamdh7@dh7.tf',
+          to: sender_tfid,
+          text: responseText,
+          time: new Date(Date.now() + 10).toISOString(),
+          read: false
+        });
+        await aiReply.save();
+        
+      } catch (e) {
+        const errorReply = new Message({
+          from: 'ai.adamdh7@dh7.tf',
+          to: sender_tfid,
+          text: "Error !?",
+          time: new Date(Date.now() + 10).toISOString(),
+          read: false
+        });
+        await errorReply.save();
+      }
+      await checkStorageLimit();
+    })();
+
+    return;
   }
 
   const newMsg = new Message({
