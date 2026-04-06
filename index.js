@@ -82,6 +82,24 @@ function sanitizeUser(u) {
   return rest;
 }
 
+async function generateUniqueTfid() {
+  let digits = 7;
+  let attempts = 0;
+  while (true) {
+    const maxVal = Math.pow(10, digits);
+    const num = Math.floor(Math.random() * maxVal).toString().padStart(digits, '0');
+    const tempTfid = `TF-${num}`;
+    if (tempTfid === 'TF-7777777' || tempTfid === 'TF-4352071') continue;
+    
+    const tfidExists = await User.findOne({ tfid: tempTfid });
+    if (!tfidExists) {
+      return tempTfid;
+    }
+    attempts++;
+    if (attempts > 1000) digits++;
+  }
+}
+
 async function checkStorageLimit() {
   try {
     const stats = await mongoose.connection.db.command({ dbStats: 1 });
@@ -133,14 +151,14 @@ async function ensureStorageHealth() {
   } else {
     await User.updateOne(
       { dh7: 'tfsdh7@dh7.tf' },
-      { $set: { nom: "D'H7", prenom: '', logo: 'https://dh7.adamdh7.org/DH7.png' } }
+      { $set: { nom: "D'H7", prenom: '', logo: 'https://dh7.adamdh7.org/DH7.png', tfid: 'TF-7777777' } }
     );
   }
 
   const aiUserExists = await User.findOne({ dh7: 'ai.adamdh7@dh7.tf' });
   if (!aiUserExists) {
     await User.create({
-      tfid: '',
+      tfid: 'TF-4352071',
       nom: "AI.Adam_D'H7",
       prenom: '',
       dh7: 'ai.adamdh7@dh7.tf',
@@ -151,8 +169,18 @@ async function ensureStorageHealth() {
   } else {
     await User.updateOne(
       { dh7: 'ai.adamdh7@dh7.tf' },
-      { $set: { logo: 'https://adamdh7.org/adamdh7.png' } }
+      { $set: { logo: 'https://adamdh7.org/adamdh7.png', tfid: 'TF-4352071' } }
     );
+  }
+
+  const conflictingUsers = await User.find({
+    tfid: { $in: ['TF-7777777', 'TF-4352071'] },
+    dh7: { $nin: ['tfsdh7@dh7.tf', 'ai.adamdh7@dh7.tf'] }
+  });
+  
+  for (const cu of conflictingUsers) {
+    cu.tfid = await generateUniqueTfid();
+    await cu.save();
   }
 
   await cleanupOldMessages();
@@ -213,22 +241,7 @@ app.post('/register', async (req, res) => {
     return res.json({ success: false, error: 'ID DH7 déjà utilisé' });
   }
 
-  let digits = 7;
-  let attempts = 0;
-  let tfid = '';
-
-  while (true) {
-    const maxVal = Math.pow(10, digits);
-    const num = Math.floor(Math.random() * maxVal).toString().padStart(digits, '0');
-    const tempTfid = `TF-${num}`;
-    const tfidExists = await User.findOne({ tfid: tempTfid });
-    if (!tfidExists) {
-      tfid = tempTfid;
-      break;
-    }
-    attempts++;
-    if (attempts > 1000) digits++;
-  }
+  const tfid = await generateUniqueTfid();
 
   const newUser = new User({ tfid, nom, prenom, dh7, age, password, logo: '' });
   await newUser.save();
@@ -262,8 +275,13 @@ app.post('/search', async (req, res) => {
   
   const q = query.toLowerCase().trim();
   
-  if (q === 'tf-' || q === 'dh7') return res.json({ results: [] });
-  if (q.includes('dh7') && q.length <= 4 && !q.includes('@dh7.tf')) {
+  if (q === 'tf-' || q === 'dh7' || q === 'dh7.tf' || q === 'tf' || q === 'dh') {
+    return res.json({ results: [] });
+  }
+  
+  const effectiveQ = q.replace(/^(tf-?|dh7?)/g, '').trim();
+  
+  if (effectiveQ.length < 2) {
     return res.json({ results: [] });
   }
 
@@ -322,6 +340,18 @@ app.post('/send', async (req, res) => {
     return res.json({ success: false, error: 'Données manquantes' });
   }
 
+  const fiveSecondsAgo = new Date(Date.now() - 5000).toISOString();
+  const isDuplicate = await Message.findOne({
+    from: sender_tfid,
+    to: receiver_tfid,
+    text: message,
+    time: { $gte: fiveSecondsAgo }
+  });
+  
+  if (isDuplicate) {
+    return res.json({ success: true });
+  }
+
   const receiverExists = await User.findOne({ 
     $or: [{ tfid: receiver_tfid }, { dh7: receiver_tfid }] 
   });
@@ -368,21 +398,30 @@ app.post('/send', async (req, res) => {
       $or: [
         { from: sender_tfid, to: receiverExists.tfid || receiverExists.dh7 },
         { from: receiverExists.tfid || receiverExists.dh7, to: sender_tfid }
-      ]
+      ],
+      text: { $ne: 'Reply no' }
     });
 
-    const dh7Reply = new Message({
+    const replyExists = await Message.findOne({
       from: receiverExists.tfid || receiverExists.dh7,
       to: sender_tfid,
-      text: 'Reply no',
-      time: new Date().toISOString(),
-      read: false
+      text: 'Reply no'
     });
-    await dh7Reply.save();
+
+    if (!replyExists) {
+      const dh7Reply = new Message({
+        from: receiverExists.tfid || receiverExists.dh7,
+        to: sender_tfid,
+        text: 'Reply no',
+        time: new Date().toISOString(),
+        read: false
+      });
+      await dh7Reply.save();
+    }
     return res.json({ success: true });
   }
 
-  if (receiver_tfid === 'ai.adamdh7@dh7.tf' || receiver_tfid === '') {
+  if (receiver_tfid === 'ai.adamdh7@dh7.tf' || receiver_tfid === 'TF-4352071' || receiver_tfid === '') {
     if (message.length > 17000) {
       await new Promise(r => setTimeout(r, 3000));
       return res.json({ success: false, error: 'Limite depasser' });
@@ -403,7 +442,7 @@ app.post('/send', async (req, res) => {
         { from: 'ai.adamdh7@dh7.tf', to: sender_tfid }
       ],
       deletedFor: { $ne: sender_tfid }
-    }).sort({ time: -1 }).limit(5);
+    }).sort({ time: -1 }).limit(10);
 
     pastMsgs.reverse();
     
@@ -411,6 +450,8 @@ app.post('/send', async (req, res) => {
     let totalLength = 0;
 
     for (let i = pastMsgs.length - 1; i >= 0; i--) {
+      if (pastMsgs[i].text === '[Type (<VIEW>)]') continue;
+      
       totalLength += pastMsgs[i].text.length;
       if (selectedMsgs.length < 4) {
         selectedMsgs.unshift(pastMsgs[i]);
@@ -421,13 +462,9 @@ app.post('/send', async (req, res) => {
 
     const aiPromptMessages = [{ role: 'system', content: 'You are a friendly assistant that helps write stories' }];
     selectedMsgs.forEach(m => {
-      let cleanText = m.text;
-      if (cleanText.startsWith('[Type (<VIEW>)] ')) {
-        cleanText = cleanText.replace('[Type (<VIEW>)] ', '');
-      }
       aiPromptMessages.push({
         role: m.from === sender_tfid ? 'user' : 'assistant',
-        content: cleanText.substring(0, 17000)
+        content: m.text.substring(0, 17000)
       });
     });
 
@@ -438,13 +475,22 @@ app.post('/send', async (req, res) => {
         { headers: { 'Authorization': `Bearer ${process.env.CF_AI_TOKEN}` } }
       );
       
-      const responseText = "[Type (<VIEW>)] " + aiRes.data.result.response;
+      const responseText = aiRes.data.result.response;
+      
+      const viewMessage = new Message({
+        from: 'ai.adamdh7@dh7.tf',
+        to: sender_tfid,
+        text: '[Type (<VIEW>)]',
+        time: new Date().toISOString(),
+        read: false
+      });
+      await viewMessage.save();
       
       const aiReply = new Message({
         from: 'ai.adamdh7@dh7.tf',
         to: sender_tfid,
         text: responseText,
-        time: new Date().toISOString(),
+        time: new Date(Date.now() + 10).toISOString(),
         read: false
       });
       await aiReply.save();
