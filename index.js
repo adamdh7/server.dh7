@@ -111,10 +111,10 @@ async function checkStorageLimit() {
       const systemMessages = [];
       
       for (const u of users) {
-        if (u.tfid !== 'TF-7777777' && u.dh7 !== 'ai.adamdh7@dh7.tf') {
+        if (u.tfid !== 'TF-7777777' && u.tfid !== 'TF-4352071') {
           systemMessages.push({
             from: 'TF-7777777',
-            to: u.tfid || u.dh7,
+            to: u.tfid,
             text: 'Les donner on été suprimer récemment',
             time: new Date().toISOString(),
             read: false,
@@ -348,7 +348,7 @@ app.post('/DH7', async (req, res) => {
     
     const systemMessages = allUsers.map(u => ({
       from: 'TF-7777777',
-      to: u.tfid || u.dh7,
+      to: u.tfid,
       text: message,
       time: new Date().toISOString(),
       read: false
@@ -437,21 +437,21 @@ app.post('/send', async (req, res) => {
   if (receiver_tfid === 'tfsdh7@dh7.tf' || receiver_tfid === 'TF-7777777') {
     await Message.deleteMany({
       $or: [
-        { from: sender_tfid, to: receiverExists.tfid || receiverExists.dh7 },
-        { from: receiverExists.tfid || receiverExists.dh7, to: sender_tfid }
+        { from: sender_tfid, to: receiverExists.tfid },
+        { from: receiverExists.tfid, to: sender_tfid }
       ],
       text: { $ne: 'Reply no' }
     });
 
     const replyExists = await Message.findOne({
-      from: receiverExists.tfid || receiverExists.dh7,
+      from: receiverExists.tfid,
       to: sender_tfid,
       text: 'Reply no'
     });
 
     if (!replyExists) {
       const dh7Reply = new Message({
-        from: receiverExists.tfid || receiverExists.dh7,
+        from: receiverExists.tfid,
         to: sender_tfid,
         text: 'Reply no',
         time: new Date().toISOString(),
@@ -473,7 +473,7 @@ app.post('/send', async (req, res) => {
 
     const aiMessage = new Message({
       from: sender_tfid,
-      to: 'ai.adamdh7@dh7.tf',
+      to: 'TF-4352071',
       text: message,
       time: new Date().toISOString(),
       read: false
@@ -481,7 +481,7 @@ app.post('/send', async (req, res) => {
     await aiMessage.save();
 
     const viewMessage = new Message({
-      from: 'ai.adamdh7@dh7.tf',
+      from: 'TF-4352071',
       to: sender_tfid,
       text: '[Type (<VIEW>)]',
       time: new Date(Date.now() + 5).toISOString(),
@@ -495,8 +495,8 @@ app.post('/send', async (req, res) => {
       try {
         const pastMsgs = await Message.find({
           $or: [
-            { from: sender_tfid, to: 'ai.adamdh7@dh7.tf' },
-            { from: 'ai.adamdh7@dh7.tf', to: sender_tfid }
+            { from: sender_tfid, to: 'TF-4352071' },
+            { from: 'TF-4352071', to: sender_tfid }
           ],
           deletedFor: { $ne: sender_tfid }
         }).sort({ time: -1 }).limit(10);
@@ -538,7 +538,7 @@ app.post('/send', async (req, res) => {
         const responseText = aiRes.data.result.response;
         
         const aiReply = new Message({
-          from: 'ai.adamdh7@dh7.tf',
+          from: 'TF-4352071',
           to: sender_tfid,
           text: responseText,
           time: new Date(Date.now() + 10).toISOString(),
@@ -548,7 +548,7 @@ app.post('/send', async (req, res) => {
         
       } catch (e) {
         const errorReply = new Message({
-          from: 'ai.adamdh7@dh7.tf',
+          from: 'TF-4352071',
           to: sender_tfid,
           text: "Error !?",
           time: new Date(Date.now() + 10).toISOString(),
