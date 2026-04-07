@@ -275,7 +275,7 @@ app.post('/search', async (req, res) => {
   
   const q = query.toLowerCase().trim();
   
-  const forbiddenExact = ['t', 'tf', 'tf-', 'd', 'dh', 'dh7', 'dh7.', 'dh7.t', 'dh7.tf'];
+  const forbiddenExact = ['t', 'tf', 'tf-', 'd', 'dh', 'dh7', 'dh7.', 'dh7.t', 'dh7.tf', '@', '@d', '@dh', '@dh7', '@dh7.', '@dh7.t', '@dh7.tf'];
   if (forbiddenExact.includes(q)) {
     return res.json({ results: [] });
   }
@@ -402,6 +402,19 @@ app.post('/send', async (req, res) => {
     return res.json({ success: false, error: 'Error !?' });
   }
 
+  if (message === '[Type (<VIEW>)]') {
+    await Message.updateMany(
+      {
+        $or: [
+          { from: sender_tfid, to: receiver_tfid },
+          { from: receiver_tfid, to: sender_tfid }
+        ]
+      },
+      { $set: { read: true } }
+    );
+    return res.json({ success: true });
+  }
+
   if (message.startsWith('[Type del-all: ')) {
     const targetTfid = message.replace('[Type del-all: ', '').replace(']', '').trim();
     await Message.updateMany(
@@ -468,10 +481,6 @@ app.post('/send', async (req, res) => {
       return res.json({ success: false, error: 'Erreur AI' });
     }
 
-    if (message === '[Type (<VIEW>)]') {
-      return res.json({ success: true });
-    }
-
     if (message.length > 17000) {
       await new Promise(r => setTimeout(r, 3000));
       return res.json({ success: false, error: 'Limite depasser' });
@@ -488,15 +497,6 @@ app.post('/send', async (req, res) => {
       read: false
     });
     await aiMessage.save();
-
-    const viewMessage = new Message({
-      from: 'TF-4352071',
-      to: sender_tfid,
-      text: '[Type (<VIEW>)]',
-      time: new Date(Date.now() + 5).toISOString(),
-      read: false
-    });
-    await viewMessage.save();
 
     res.json({ success: true });
 
