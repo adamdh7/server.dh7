@@ -275,7 +275,8 @@ app.post('/search', async (req, res) => {
   
   const q = query.toLowerCase().trim();
   
-  if (q === 'tf-' || q === 'dh7' || q === 'dh7.tf' || q === 'tf' || q === 'dh') {
+  const forbiddenExact = ['t', 'tf', 'tf-', 'd', 'dh', 'dh7', 'dh7.', 'dh7.t', 'dh7.tf'];
+  if (forbiddenExact.includes(q)) {
     return res.json({ results: [] });
   }
   
@@ -462,7 +463,15 @@ app.post('/send', async (req, res) => {
     return res.json({ success: true });
   }
 
-  if (receiver_tfid === 'ai.adamdh7@dh7.tf' || receiver_tfid === 'TF-4352071' || receiver_tfid === '') {
+  if (receiver_tfid === 'ai.adamdh7@dh7.tf' || receiver_tfid === 'TF-4352071') {
+    if (sender_tfid === 'TF-4352071') {
+      return res.json({ success: false, error: 'Erreur AI' });
+    }
+
+    if (message === '[Type (<VIEW>)]') {
+      return res.json({ success: true });
+    }
+
     if (message.length > 17000) {
       await new Promise(r => setTimeout(r, 3000));
       return res.json({ success: false, error: 'Limite depasser' });
