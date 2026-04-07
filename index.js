@@ -402,7 +402,7 @@ app.post('/send', async (req, res) => {
     return res.json({ success: false, error: 'Error !?' });
   }
 
-  if (message === '[Type (<VIEW>)]') {
+  if (message.includes('[Type (<VIEW>)]') || message.includes('[Type (<VIEW)>)]')) {
     await Message.updateMany(
       {
         $or: [
@@ -516,7 +516,7 @@ app.post('/send', async (req, res) => {
         let totalLength = 0;
 
         for (let i = pastMsgs.length - 1; i >= 0; i--) {
-          if (pastMsgs[i].text === '[Type (<VIEW>)]') continue;
+          if (pastMsgs[i].text.includes('[Type (<VIEW>)]') || pastMsgs[i].text.includes('[Type (<VIEW)>)]')) continue;
           
           totalLength += pastMsgs[i].text.length;
           if (selectedMsgs.length < 4) {
