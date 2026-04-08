@@ -10,42 +10,24 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ALLOWED_ORIGINS = new Set(['https://dh7.dh7.adamdh7.org', 'https://dh7.adamdh7.org', 'https://quiz.adamdh7.org', 'https://dh7test.pages.dev', 'https://www.adamdh7.org', 'file://']);
+const ALLOWED_ORIGINS = new Set(['https://dh7.dh7.adamdh7.org', 'https://dh7.adamdh7.org', 'https://quiz.adamdh7.org', 'https://dh7test.pages.dev', 'https://www.adamdh7.org']);
 const ALLOWED_HOSTS = new Set(['dh7.adamdh7.org', 'quiz.pages.dev', 'dh7test.pages.dev', 'www.adamdh7.org']);
 const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
 
 app.use(bodyParser.json());
 
-function normalizeOriginValue(origin) {
-  if (!origin) return null;
-  if (origin === 'null') return 'null';
-  try {
-    return new URL(origin).origin;
-  } catch (e) {
-    return origin.startsWith('file://') ? 'null' : null;
-  }
-}
-
-function isBrowserUserAgent(ua) {
-  if (!ua) return false;
-  return /Mozilla|Chrome|Safari|Firefox|Edge|Opera|WebView/i.test(ua);
-}
-
-function hasBrowserFetchHeaders(req) {
-  return Boolean(req.headers['sec-fetch-site'] || req.headers['sec-fetch-mode'] || req.headers['sec-fetch-dest'] || req.headers['sec-ch-ua'] || req.headers['sec-ch-ua-platform']);
-}
-
-function isLikelyBrowserRequest(req) {
-  const ua = req.headers['user-agent'] || '';
-  return isBrowserUserAgent(ua) && hasBrowserFetchHeaders(req);
-}
-
 const corsOptions = {
   origin: function(origin, callback) {
-    const normalized = normalizeOriginValue(origin);
-    if (normalized && ALLOWED_ORIGINS.has(normalized)) return callback(null, true);
-    if (normalized === 'null') return callback(null, true);
-    return callback(new Error('Origin non autorisé'), false);
+    if (!origin || origin === 'null' || origin.startsWith('file://')) {
+      return callback(null, true);
+    }
+    try {
+      const normalized = (new URL(origin)).origin;
+      if (ALLOWED_ORIGINS.has(normalized)) return callback(null, true);
+      return callback(new Error('Origin non autorisé'), false);
+    } catch (e) {
+      return callback(new Error('Origin invalide'), false);
+    }
   },
   optionsSuccessStatus: 204
 };
@@ -62,17 +44,7 @@ const userSchema = new mongoose.Schema({
   password: { type: String, default: '' },
   logo: { type: String, default: '' }
 });
-
-const groupSchema = new mongoose.Schema({
-  tfid: { type: String, default: '', unique: true, index: true },
-  nom: { type: String, default: '' },
-  poto: { type: String, default: '' },
-  ownerTfid: { type: String, default: '' },
-  admins: { type: [String], default: [] },
-  members: { type: [String], default: [] },
-  createdAt: { type: String, default: () => new Date().toISOString() },
-  updatedAt: { type: String, default: () => new Date().toISOString() }
-});
+const User = mongoose.model('User', userSchema);
 
 const messageSchema = new mongoose.Schema({
   from: String,
@@ -80,13 +52,19 @@ const messageSchema = new mongoose.Schema({
   text: String,
   time: String,
   read: { type: Boolean, default: false },
-  deletedFor: { type: [String], default: [] },
-  groupTfid: { type: String, default: '' }
+  deletedFor: { type: [String], default: [] }
 });
-
-const User = mongoose.model('User', userSchema);
-const Group = mongoose.model('Group', groupSchema);
 const Message = mongoose.model('Message', messageSchema);
+
+const groupSchema = new mongoose.Schema({
+  tfid: String,
+  nom: String,
+  photo: { type: String, default: '' },
+  proprietaire: String,
+  admins: { type: [String], default: [] },
+  membres: { type: [String], default: [] }
+});
+const Group = mongoose.model('Group', groupSchema);
 
 const s3Client = new S3Client({
   region: 'auto',
@@ -101,72 +79,50 @@ const upload = multer({ storage: multer.memoryStorage() });
 function sanitizeUser(u) {
   const obj = u.toObject ? u.toObject() : u;
   const { password, ...rest } = obj;
-
+  
   if (!rest.logo) {
     rest.logo = 'https://adamdh7.org/adamdh7.png';
   }
-
+  
   if (rest.age && rest.age.length >= 4) {
     const birthYear = parseInt(rest.age.substring(0, 4), 10);
     if (!isNaN(birthYear)) {
       rest.age = (new Date().getFullYear() - birthYear).toString();
     }
   }
-
+  
   return rest;
 }
 
-function sanitizeGroup(g) {
-  const obj = g.toObject ? g.toObject() : g;
-  return obj;
-}
-
-async function generateUniqueNumericTfid(model, digits, prefix) {
+async function generateUniqueTfid() {
+  let digits = 7;
   let attempts = 0;
   while (true) {
     const maxVal = Math.pow(10, digits);
     const num = Math.floor(Math.random() * maxVal).toString().padStart(digits, '0');
-    const tfid = `${prefix}${num}`;
-    if (tfid === 'TF-7777777' || tfid === 'TF-4352071') continue;
-    const exists = await model.findOne({ tfid });
-    if (!exists) return tfid;
+    const tempTfid = `TF-${num}`;
+    if (tempTfid === 'TF-7777777' || tempTfid === 'TF-4352071') continue;
+    
+    const tfidExists = await User.findOne({ tfid: tempTfid });
+    if (!tfidExists) {
+      return tempTfid;
+    }
     attempts++;
     if (attempts > 1000) digits++;
   }
 }
 
-async function generateUniqueTfid() {
-  return generateUniqueNumericTfid(User, 7, 'TF-');
-}
-
-async function generateUniqueGroupTfid() {
-  return generateUniqueNumericTfid(Group, 17, 'TF-');
-}
-
-async function resolveUserTfid(identifier) {
-  if (!identifier) return null;
-  const user = await User.findOne({
-    $or: [{ tfid: identifier }, { dh7: identifier }]
-  });
-  return user ? user.tfid : null;
-}
-
-async function deleteGroupAndMessages(groupTfid) {
-  await Message.deleteMany({ groupTfid });
-  await Group.deleteMany({ tfid: groupTfid });
-}
-
-async function cleanupEmptyGroups() {
-  const groups = await Group.find({});
-  for (const group of groups) {
-    const members = Array.isArray(group.members) ? group.members.filter(Boolean) : [];
-    const uniqueMembers = [...new Set(members)];
-    if (uniqueMembers.length === 0) {
-      await deleteGroupAndMessages(group.tfid);
-    } else if (uniqueMembers.length !== members.length) {
-      group.members = uniqueMembers;
-      group.updatedAt = new Date().toISOString();
-      await group.save();
+async function generateGroupTfid() {
+  let digits = 17;
+  while (true) {
+    let num = '';
+    for (let i = 0; i < digits; i++) {
+      num += Math.floor(Math.random() * 10).toString();
+    }
+    const tempTfid = `TF-${num}`;
+    const tfidExists = await Group.findOne({ tfid: tempTfid });
+    if (!tfidExists) {
+      return tempTfid;
     }
   }
 }
@@ -175,12 +131,12 @@ async function checkStorageLimit() {
   try {
     const stats = await mongoose.connection.db.command({ dbStats: 1 });
     const limit = 400 * 1024 * 1024;
-
+    
     if (stats.dataSize > limit) {
       await Message.deleteMany({});
       const users = await User.find({});
       const systemMessages = [];
-
+      
       for (const u of users) {
         if (u.tfid !== 'TF-7777777' && u.tfid !== 'TF-4352071') {
           systemMessages.push({
@@ -189,8 +145,7 @@ async function checkStorageLimit() {
             text: 'Les donner on été suprimer récemment',
             time: new Date().toISOString(),
             read: false,
-            deletedFor: [],
-            groupTfid: ''
+            deletedFor: []
           });
         }
       }
@@ -249,7 +204,7 @@ async function ensureStorageHealth() {
     tfid: { $in: ['TF-7777777', 'TF-4352071'] },
     dh7: { $nin: ['tfsdh7@dh7.tf', 'ai.adamdh7@dh7.tf'] }
   });
-
+  
   for (const cu of conflictingUsers) {
     cu.tfid = await generateUniqueTfid();
     await cu.save();
@@ -257,14 +212,19 @@ async function ensureStorageHealth() {
 
   await cleanupOldMessages();
   await checkStorageLimit();
-  await cleanupEmptyGroups();
+}
+
+function isBrowserUserAgent(ua) {
+  if (!ua) return false;
+  return /Mozilla|Chrome|Safari|Firefox|Edge|Opera/i.test(ua);
 }
 
 async function verifyCaller(req, res, next) {
   const originHeader = req.headers.origin || req.headers.referer || null;
   const token = req.headers['x-worker-token'] || '';
+  const appSecret = req.headers['x-app-request'] || '';
   const callerHost = (req.headers['x-caller-host'] || '').toLowerCase();
-  const browserLike = isLikelyBrowserRequest(req);
+  const ua = req.headers['user-agent'] || '';
 
   req.isWorker = false;
 
@@ -273,31 +233,37 @@ async function verifyCaller(req, res, next) {
     return next();
   }
 
-  if (req.method === 'OPTIONS') {
-    if (browserLike) return next();
-    return res.status(403).json({ success: false, error: 'Préflight non autorisé' });
-  }
-
   if (req.path === '/sync') {
     return res.status(403).json({ success: false, error: 'Accès strict travailleur requis' });
   }
 
-  if (!browserLike) {
-    return res.status(403).json({ success: false, error: 'Requête navigateur requise' });
+  if (appSecret === 'AdamDH7App') {
+    return next();
   }
+
+  const isBrowser = isBrowserUserAgent(ua);
+  const isCurl = ua.toLowerCase().includes('curl') || ua.toLowerCase().includes('postman');
 
   if (originHeader) {
-    const normalized = normalizeOriginValue(originHeader);
-    if (normalized && ALLOWED_ORIGINS.has(normalized)) {
+    try {
+      const normalized = (new URL(originHeader)).origin;
+      if (!ALLOWED_ORIGINS.has(normalized)) {
+        return res.status(403).json({ success: false, error: 'Origin non autorisé' });
+      }
+      if (!isBrowser || isCurl) {
+        return res.status(403).json({ success: false, error: 'Navigateur requis pour cette origine' });
+      }
       return next();
+    } catch (e) {
+      return res.status(400).json({ success: false, error: 'Origin invalide' });
     }
-    if (normalized === 'null') {
-      return next();
-    }
-    return res.status(403).json({ success: false, error: 'Origin non autorisé' });
   }
 
-  return next();
+  if (isBrowser) {
+    return res.status(403).json({ success: false, error: 'Accès navigateur non autorisé' });
+  }
+
+  return res.status(403).json({ success: false, error: 'Appel non autorisé' });
 }
 
 app.use(verifyCaller);
@@ -307,7 +273,7 @@ app.post('/register', async (req, res) => {
   if (!nom || !prenom || !dh7 || !password) {
     return res.json({ success: false, error: 'Données manquantes' });
   }
-
+  
   const existingUser = await User.findOne({ dh7 });
   if (existingUser) {
     return res.json({ success: false, error: 'ID DH7 déjà utilisé' });
@@ -341,19 +307,26 @@ app.get('/users', async (req, res) => {
   res.json(users.map(sanitizeUser));
 });
 
+app.post('/my-groups', async (req, res) => {
+  const { tfid } = req.body;
+  if (!tfid) return res.json([]);
+  const groups = await Group.find({ membres: tfid });
+  res.json(groups);
+});
+
 app.post('/search', async (req, res) => {
   const { query } = req.body;
   if (!query) return res.json({ results: [] });
-
+  
   const q = query.toLowerCase().trim();
-
+  
   const forbiddenExact = ['t', 'tf', 'tf-', 'd', 'dh', 'dh7', 'dh7.', 'dh7.t', 'dh7.tf', '@', '@d', '@dh', '@dh7', '@dh7.', '@dh7.t', '@dh7.tf'];
   if (forbiddenExact.includes(q)) {
     return res.json({ results: [] });
   }
-
+  
   const effectiveQ = q.replace(/^(tf-?|dh7?)/g, '').trim();
-
+  
   if (effectiveQ.length < 2) {
     return res.json({ results: [] });
   }
@@ -369,232 +342,82 @@ app.post('/search', async (req, res) => {
   res.json({ results: users.map(sanitizeUser) });
 });
 
-app.get('/group', async (req, res) => {
-  const { mode, tfid } = req.query;
-
-  if (mode === 'users') {
-    const users = await User.find({});
-    return res.json({ success: true, users: users.map(sanitizeUser) });
-  }
-
-  if (tfid) {
-    const groups = await Group.find({
-      $or: [
-        { tfid },
-        { members: tfid },
-        { admins: tfid },
-        { ownerTfid: tfid }
-      ]
-    }).sort({ createdAt: -1 });
-    return res.json({ success: true, groups: groups.map(sanitizeGroup) });
-  }
-
-  const groups = await Group.find({}).sort({ createdAt: -1 });
-  return res.json({ success: true, groups: groups.map(sanitizeGroup) });
-});
-
-app.post('/group/messages', async (req, res) => {
-  const { group_tfid, tfid } = req.body;
-  if (!group_tfid || !tfid) return res.json([]);
-
-  const group = await Group.findOne({
-    tfid: group_tfid,
-    $or: [
-      { members: tfid },
-      { admins: tfid },
-      { ownerTfid: tfid }
-    ]
-  });
-
-  if (!group) return res.json([]);
-
-  const msgs = await Message.find({ groupTfid: group_tfid, deletedFor: { $ne: tfid } }).sort({ time: 1 });
-  res.json(msgs);
-});
-
 app.post('/group', async (req, res) => {
-  const { action, nom, poto, owner_tfid, owner, members, group_tfid, target_tfid, actor_tfid, sender_tfid, message } = req.body;
+  const { action, group_tfid, sender_tfid, target_tfid, nom, photo } = req.body;
+  if (!action || !sender_tfid) return res.json({ success: false, error: 'Données manquantes' });
 
-  if (!action || action === 'create') {
-    const ownerId = await resolveUserTfid(owner_tfid || owner);
-    if (!nom || !poto || !ownerId) {
-      return res.json({ success: false, error: 'Données manquantes' });
-    }
-
-    let memberList = [];
-    if (Array.isArray(members) && members.length > 0) {
-      for (const item of members) {
-        const tfid = await resolveUserTfid(item);
-        if (tfid) memberList.push(tfid);
-      }
-    } else if (req.body.includeAllUsers) {
-      const allUsers = await User.find({});
-      memberList = allUsers
-        .map(u => u.tfid)
-        .filter(Boolean)
-        .filter(tfid => tfid !== 'TF-7777777' && tfid !== 'TF-4352071');
-    }
-
-    memberList.push(ownerId);
-    memberList = [...new Set(memberList)];
-
-    const tfid = await generateUniqueGroupTfid();
-    const group = new Group({
+  if (action === 'create') {
+    if (!nom) return res.json({ success: false, error: 'Nom requis' });
+    const tfid = await generateGroupTfid();
+    const newGroup = new Group({
       tfid,
       nom,
-      poto,
-      ownerTfid: ownerId,
-      admins: [ownerId],
-      members: memberList,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      photo: photo || '',
+      proprietaire: sender_tfid,
+      membres: [sender_tfid],
+      admins: [sender_tfid]
     });
-    await group.save();
-    return res.json({ success: true, group: sanitizeGroup(group) });
+    await newGroup.save();
+    return res.json({ success: true, group_tfid: tfid });
   }
 
-  const groupId = group_tfid;
-  if (!groupId) {
-    return res.json({ success: false, error: 'Groupe introuvable' });
-  }
+  if (!group_tfid) return res.json({ success: false, error: 'Groupe manquant' });
+  const group = await Group.findOne({ tfid: group_tfid });
+  if (!group) return res.json({ success: false, error: 'Groupe introuvable' });
 
-  const group = await Group.findOne({ tfid: groupId });
-  if (!group) {
-    return res.json({ success: false, error: 'Groupe introuvable' });
-  }
+  const isProprietaire = group.proprietaire === sender_tfid;
+  const isAdmin = group.admins.includes(sender_tfid);
 
-  if (action === 'send') {
-    const senderId = await resolveUserTfid(sender_tfid);
-    if (!senderId || !message) {
-      return res.json({ success: false, error: 'Données manquantes' });
+  if (action === 'add') {
+    if (!isAdmin && !isProprietaire) return res.json({ success: false, error: 'Non autorisé' });
+    if (!group.membres.includes(target_tfid)) {
+      group.membres.push(target_tfid);
+      await group.save();
     }
-    const isMember = group.members.includes(senderId) || group.admins.includes(senderId) || group.ownerTfid === senderId;
-    if (!isMember) {
-      return res.json({ success: false, error: 'Accès refusé' });
-    }
-
-    const groupMsg = new Message({
-      from: senderId,
-      to: groupId,
-      text: message,
-      time: new Date().toISOString(),
-      read: false,
-      deletedFor: [],
-      groupTfid: groupId
-    });
-    await groupMsg.save();
-    await cleanupOldMessages();
-    await checkStorageLimit();
     return res.json({ success: true });
   }
 
-  const actorId = await resolveUserTfid(actor_tfid);
-  const targetId = await resolveUserTfid(target_tfid);
-
-  if (action === 'leave') {
-    const leaverId = actorId || await resolveUserTfid(target_tfid || actor_tfid);
-    if (!leaverId) return res.json({ success: false, error: 'Utilisateur introuvable' });
-
-    group.members = group.members.filter(id => id !== leaverId);
-    group.admins = group.admins.filter(id => id !== leaverId);
-
-    if (group.ownerTfid === leaverId) {
-      group.ownerTfid = '';
-    }
-
-    group.updatedAt = new Date().toISOString();
-
-    if (group.members.length < 1) {
-      await deleteGroupAndMessages(groupId);
-      return res.json({ success: true, deleted: true });
-    }
-
+  if (action === 'remove') {
+    if (!isAdmin && !isProprietaire) return res.json({ success: false, error: 'Non autorisé' });
+    if (target_tfid === group.proprietaire) return res.json({ success: false, error: 'Impossible' });
+    group.membres = group.membres.filter(id => id !== target_tfid);
+    group.admins = group.admins.filter(id => id !== target_tfid);
     await group.save();
-    return res.json({ success: true, group: sanitizeGroup(group) });
+    if (group.membres.length === 0) {
+      await Message.deleteMany({ to: group_tfid });
+      await Group.deleteOne({ tfid: group_tfid });
+    }
+    return res.json({ success: true });
   }
 
-  if (action === 'remove') {
-    if (!actorId || !targetId) {
-      return res.json({ success: false, error: 'Données manquantes' });
+  if (action === 'leave') {
+    group.membres = group.membres.filter(id => id !== sender_tfid);
+    group.admins = group.admins.filter(id => id !== sender_tfid);
+    if (group.proprietaire === sender_tfid) {
+      group.proprietaire = '';
     }
-
-    const actorIsOwner = group.ownerTfid === actorId;
-    const actorIsAdmin = group.admins.includes(actorId);
-    if (!actorIsOwner && !actorIsAdmin) {
-      return res.json({ success: false, error: 'Accès refusé' });
-    }
-
-    if (targetId === group.ownerTfid) {
-      return res.json({ success: false, error: 'Propriétaire protégé' });
-    }
-
-    group.members = group.members.filter(id => id !== targetId);
-    group.admins = group.admins.filter(id => id !== targetId);
-    group.updatedAt = new Date().toISOString();
-
-    if (group.members.length < 1) {
-      await deleteGroupAndMessages(groupId);
-      return res.json({ success: true, deleted: true });
-    }
-
     await group.save();
-    return res.json({ success: true, group: sanitizeGroup(group) });
+    if (group.membres.length === 0) {
+      await Message.deleteMany({ to: group_tfid });
+      await Group.deleteOne({ tfid: group_tfid });
+    }
+    return res.json({ success: true });
   }
 
   if (action === 'promote') {
-    if (!actorId || !targetId) {
-      return res.json({ success: false, error: 'Données manquantes' });
+    if (!isAdmin && !isProprietaire) return res.json({ success: false, error: 'Non autorisé' });
+    if (!group.admins.includes(target_tfid)) {
+      group.admins.push(target_tfid);
+      await group.save();
     }
-
-    const actorIsOwner = group.ownerTfid === actorId;
-    const actorIsAdmin = group.admins.includes(actorId);
-    if (!actorIsOwner && !actorIsAdmin) {
-      return res.json({ success: false, error: 'Accès refusé' });
-    }
-
-    if (!group.members.includes(targetId) && !group.admins.includes(targetId) && group.ownerTfid !== targetId) {
-      return res.json({ success: false, error: 'Utilisateur introuvable dans le groupe' });
-    }
-
-    if (!group.admins.includes(targetId)) {
-      group.admins.push(targetId);
-    }
-
-    if (!group.members.includes(targetId)) {
-      group.members.push(targetId);
-    }
-
-    group.updatedAt = new Date().toISOString();
-    await group.save();
-    return res.json({ success: true, group: sanitizeGroup(group) });
+    return res.json({ success: true });
   }
 
   if (action === 'delete') {
-    if (!actorId) {
-      return res.json({ success: false, error: 'Données manquantes' });
-    }
-    if (group.ownerTfid !== actorId) {
-      return res.json({ success: false, error: 'Seul le propriétaire peut supprimer' });
-    }
-    await deleteGroupAndMessages(groupId);
-    return res.json({ success: true, deleted: true });
-  }
-
-  if (action === 'add') {
-    if (!actorId || !targetId) {
-      return res.json({ success: false, error: 'Données manquantes' });
-    }
-    const actorIsOwner = group.ownerTfid === actorId;
-    const actorIsAdmin = group.admins.includes(actorId);
-    if (!actorIsOwner && !actorIsAdmin) {
-      return res.json({ success: false, error: 'Accès refusé' });
-    }
-    if (!group.members.includes(targetId)) {
-      group.members.push(targetId);
-    }
-    group.updatedAt = new Date().toISOString();
-    await group.save();
-    return res.json({ success: true, group: sanitizeGroup(group) });
+    if (!isProprietaire) return res.json({ success: false, error: 'Non autorisé' });
+    await Message.deleteMany({ to: group_tfid });
+    await Group.deleteOne({ tfid: group_tfid });
+    return res.json({ success: true });
   }
 
   return res.json({ success: false, error: 'Action inconnue' });
@@ -603,23 +426,22 @@ app.post('/group', async (req, res) => {
 app.post('/messages', async (req, res) => {
   const { user1_tfid, user2_tfid } = req.body;
   if (!user1_tfid || !user2_tfid) return res.json([]);
-
-  const group = await Group.findOne({ tfid: user2_tfid });
-  if (group) {
-    const isMember = group.members.includes(user1_tfid) || group.admins.includes(user1_tfid) || group.ownerTfid === user1_tfid;
-    if (!isMember) return res.json([]);
-    const msgs = await Message.find({ groupTfid: group.tfid, deletedFor: { $ne: user1_tfid } }).sort({ time: 1 });
-    return res.json(msgs);
+  
+  let msgs;
+  if (user2_tfid.length === 20 && user2_tfid.startsWith('TF-')) {
+    msgs = await Message.find({
+      to: user2_tfid,
+      deletedFor: { $ne: user1_tfid }
+    }).sort({ time: 1 });
+  } else {
+    msgs = await Message.find({
+      $or: [
+        { from: user1_tfid, to: user2_tfid },
+        { from: user2_tfid, to: user1_tfid }
+      ],
+      deletedFor: { $ne: user1_tfid }
+    }).sort({ time: 1 });
   }
-
-  const msgs = await Message.find({
-    $or: [
-      { from: user1_tfid, to: user2_tfid },
-      { from: user2_tfid, to: user1_tfid }
-    ],
-    deletedFor: { $ne: user1_tfid }
-  }).sort({ time: 1 });
-
   res.json(msgs);
 });
 
@@ -636,10 +458,10 @@ app.post('/upload-profile', upload.single('image'), async (req, res) => {
       ContentType: file.mimetype
     });
     await s3Client.send(command);
-
+    
     const logoUrl = `https://pub-24986ee77a4440dba7c072922c670547.r2.dev/${tfid}`;
     await User.updateOne({ tfid: tfid }, { $set: { logo: logoUrl } });
-
+    
     res.json({ success: true, logo: logoUrl });
   } catch (e) {
     res.json({ success: false, error: 'Erreur upload' });
@@ -651,23 +473,21 @@ app.post('/DH7', async (req, res) => {
   if (!user || !message) {
     return res.json({ success: false, error: 'Données manquantes' });
   }
-
+  
   if (user === 'All') {
     const allUsers = await User.find({
       tfid: { $nin: ['TF-7777777', 'TF-4352071'] },
       dh7: { $nin: ['tfsdh7@dh7.tf', 'ai.adamdh7@dh7.tf'] }
     });
-
+    
     const systemMessages = allUsers.map(u => ({
       from: 'TF-7777777',
       to: u.tfid,
       text: message,
       time: new Date().toISOString(),
-      read: false,
-      deletedFor: [],
-      groupTfid: ''
+      read: false
     }));
-
+    
     if (systemMessages.length > 0) {
       await Message.insertMany(systemMessages);
     }
@@ -680,8 +500,7 @@ app.post('/DH7', async (req, res) => {
         to: targetUser.tfid,
         text: message,
         time: new Date().toISOString(),
-        read: false,
-        groupTfid: ''
+        read: false
       });
       await sysMsg.save();
       return res.json({ success: true });
@@ -703,83 +522,85 @@ app.post('/send', async (req, res) => {
     text: message,
     time: { $gte: fiveSecondsAgo }
   });
-
+  
   if (isDuplicate) {
     return res.json({ success: true });
   }
 
-  const group = await Group.findOne({ tfid: receiver_tfid });
-  if (group) {
-    const senderResolved = await resolveUserTfid(sender_tfid);
-    if (!senderResolved) {
-      return res.json({ success: false, error: 'Error !?' });
+  let receiverExists = null;
+  const isGroup = receiver_tfid.length === 20 && receiver_tfid.startsWith('TF-');
+  
+  if (isGroup) {
+    receiverExists = await Group.findOne({ tfid: receiver_tfid });
+    if (receiverExists && !receiverExists.membres.includes(sender_tfid)) {
+      return res.json({ success: false, error: 'Non autorisé' });
     }
-
-    const senderIsMember = group.members.includes(senderResolved) || group.admins.includes(senderResolved) || group.ownerTfid === senderResolved;
-    if (!senderIsMember) {
-      return res.json({ success: false, error: 'Accès refusé' });
-    }
-
-    const groupMsg = new Message({
-      from: senderResolved,
-      to: group.tfid,
-      text: message,
-      time: new Date().toISOString(),
-      read: false,
-      deletedFor: [],
-      groupTfid: group.tfid
+  } else {
+    receiverExists = await User.findOne({ 
+      $or: [{ tfid: receiver_tfid }, { dh7: receiver_tfid }] 
     });
-    await groupMsg.save();
-    await cleanupOldMessages();
-    await checkStorageLimit();
-    return res.json({ success: true });
   }
-
-  const receiverExists = await User.findOne({
-    $or: [{ tfid: receiver_tfid }, { dh7: receiver_tfid }]
-  });
 
   if (!receiverExists && receiver_tfid !== '') {
     return res.json({ success: false, error: 'Error !?' });
   }
 
   if (message.includes('[Type (<VIEW>)]') || message.includes('[Type (<VIEW)>)]')) {
-    await Message.updateMany(
-      {
-        $or: [
-          { from: sender_tfid, to: receiver_tfid },
-          { from: receiver_tfid, to: sender_tfid }
-        ]
-      },
-      { $set: { read: true } }
-    );
+    if (isGroup) {
+      await Message.updateMany(
+        { to: receiver_tfid },
+        { $set: { read: true } }
+      );
+    } else {
+      await Message.updateMany(
+        {
+          $or: [
+            { from: sender_tfid, to: receiver_tfid },
+            { from: receiver_tfid, to: sender_tfid }
+          ]
+        },
+        { $set: { read: true } }
+      );
+    }
     return res.json({ success: true });
   }
 
   if (message.startsWith('[Type del-all: ')) {
     const targetTfid = message.replace('[Type del-all: ', '').replace(']', '').trim();
-    await Message.updateMany(
-      {
-        $or: [
-          { from: sender_tfid, to: targetTfid },
-          { from: targetTfid, to: sender_tfid }
-        ]
-      },
-      { $addToSet: { deletedFor: sender_tfid } }
-    );
+    if (targetTfid.length === 20 && targetTfid.startsWith('TF-')) {
+      await Message.updateMany(
+        { to: targetTfid },
+        { $addToSet: { deletedFor: sender_tfid } }
+      );
+    } else {
+      await Message.updateMany(
+        {
+          $or: [
+            { from: sender_tfid, to: targetTfid },
+            { from: targetTfid, to: sender_tfid }
+          ]
+        },
+        { $addToSet: { deletedFor: sender_tfid } }
+      );
+    }
     return res.json({ success: true });
   }
 
   if (message.startsWith('[Type del: ')) {
     const targetId = message.replace('[Type del: ', '').replace(']', '').trim();
-    const msgs = await Message.find({
-      $or: [
-        { from: sender_tfid, to: receiver_tfid },
-        { from: receiver_tfid, to: sender_tfid }
-      ]
-    });
+    let msgs;
+    if (isGroup) {
+      msgs = await Message.find({ to: receiver_tfid });
+    } else {
+      msgs = await Message.find({
+        $or: [
+          { from: sender_tfid, to: receiver_tfid },
+          { from: receiver_tfid, to: sender_tfid }
+        ]
+      });
+    }
     for (let m of msgs) {
-      if (`${m.time}${m.from}` === targetId) {
+      if (m.time + m.from === targetId) {
         if (!m.deletedFor.includes(sender_tfid)) {
           m.deletedFor.push(sender_tfid);
           await m.save();
@@ -835,8 +656,7 @@ app.post('/send', async (req, res) => {
       to: 'TF-4352071',
       text: message,
       time: new Date().toISOString(),
-      read: false,
-      groupTfid: ''
+      read: false
     });
     await aiMessage.save();
 
@@ -853,13 +673,13 @@ app.post('/send', async (req, res) => {
         }).sort({ time: -1 }).limit(10);
 
         pastMsgs.reverse();
-
+        
         let selectedMsgs = [];
         let totalLength = 0;
 
         for (let i = pastMsgs.length - 1; i >= 0; i--) {
           if (pastMsgs[i].text.includes('[Type (<VIEW>)]') || pastMsgs[i].text.includes('[Type (<VIEW)>)]')) continue;
-
+          
           totalLength += pastMsgs[i].text.length;
           if (selectedMsgs.length < 4) {
             selectedMsgs.unshift(pastMsgs[i]);
@@ -868,11 +688,11 @@ app.post('/send', async (req, res) => {
           }
         }
 
-        const aiPromptMessages = [{
-          role: 'system',
-          content: `You are Adam_D'H7, D'H7 is a messaging web app like others and you are the AI of their web so users can contact you to ask questions. Answer thanks to what you know about messaging apps and webs, and be brief. The user contacting you is: ${userInfo}`
+        const aiPromptMessages = [{ 
+          role: 'system', 
+          content: `You are Adam_D'H7, D'H7 is a messaging web app like others and you are the AI of their web so users can contact you to ask questions. Answer thanks to what you know about messaging apps and webs, and be brief. The user contacting you is: ${userInfo}` 
         }];
-
+        
         selectedMsgs.forEach(m => {
           aiPromptMessages.push({
             role: m.from === sender_tfid ? 'user' : 'assistant',
@@ -885,27 +705,25 @@ app.post('/send', async (req, res) => {
           { messages: aiPromptMessages },
           { headers: { 'Authorization': `Bearer ${process.env.CF_AI_TOKEN}` } }
         );
-
+        
         const responseText = aiRes.data.result.response;
-
+        
         const aiReply = new Message({
           from: 'TF-4352071',
           to: sender_tfid,
           text: responseText,
           time: new Date(Date.now() + 10).toISOString(),
-          read: false,
-          groupTfid: ''
+          read: false
         });
         await aiReply.save();
-
+        
       } catch (e) {
         const errorReply = new Message({
           from: 'TF-4352071',
           to: sender_tfid,
           text: "Error !?",
           time: new Date(Date.now() + 10).toISOString(),
-          read: false,
-          groupTfid: ''
+          read: false
         });
         await errorReply.save();
       }
@@ -920,8 +738,7 @@ app.post('/send', async (req, res) => {
     to: receiver_tfid,
     text: message,
     time: new Date().toISOString(),
-    read: false,
-    groupTfid: ''
+    read: false
   });
   await newMsg.save();
   await cleanupOldMessages();
@@ -931,15 +748,6 @@ app.post('/send', async (req, res) => {
 
 app.post('/mark-read', async (req, res) => {
   const { sender_tfid, receiver_tfid } = req.body;
-  const group = await Group.findOne({ tfid: receiver_tfid });
-  if (group) {
-    await Message.updateMany(
-      { groupTfid: group.tfid },
-      { $set: { read: true } }
-    );
-    return res.json({ success: true });
-  }
-
   await Message.updateMany(
     { from: sender_tfid, to: receiver_tfid },
     { $set: { read: true } }
@@ -951,11 +759,11 @@ app.get('/get/:page', async (req, res) => {
   const page = parseInt(req.params.page) || 1;
   const limit = 100;
   const skip = (page - 1) * limit;
-
+  
   const users = await User.find({}).skip(skip).limit(limit + 1);
   const hasMore = users.length > limit;
   const batch = users.slice(0, limit).map(u => req.isWorker ? u : sanitizeUser(u));
-
+  
   res.json({
     batch,
     has_more: hasMore
@@ -964,7 +772,7 @@ app.get('/get/:page', async (req, res) => {
 
 app.post('/sync', async (req, res) => {
   const { users: incomingUsers, messages: incomingMsgs } = req.body;
-
+  
   if (incomingUsers && Array.isArray(incomingUsers)) {
     for (const u of incomingUsers) {
       const exists = await User.findOne({ tfid: u.tfid });
@@ -973,7 +781,7 @@ app.post('/sync', async (req, res) => {
       }
     }
   }
-
+  
   if (incomingMsgs && Array.isArray(incomingMsgs)) {
     let msgsModified = false;
     for (const m of incomingMsgs) {
@@ -988,7 +796,7 @@ app.post('/sync', async (req, res) => {
       await checkStorageLimit();
     }
   }
-
+  
   res.json({ success: true });
 });
 
