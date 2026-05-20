@@ -717,14 +717,17 @@ app.post('/send', async (req, res) => {
           }
         }
 
-        const systemInstructions = `You are the D'H7 assistant. The user contacting you is: ${userInfo}
+        const systemInstructions = `You are the D'H7 Assistant. The user contacting you is: ${userInfo}
 You can chat with the user normally.
-IF you need internal information or actions, output EXACTLY ONE of these commands on a single line, and NOTHING ELSE:
+IF you need internal information or actions, output EXACTLY ONE of these commands on a single line, and NOTHING ELSE:D'
+
 [Type SEARCH: About D'H7]
 [Type SEARCH: Moderation Rules]
 [Type CHECK: TFID] (replace TFID with the user's ID)
 [Type SPAM: TFID] (restrict a user for 24h)
 [Type BAN: TFID] (permanently ban)
+
+You can permanently ban a user or apply a 24-hour spam ban if they violate D'H7 usage rules.
 
 If you output a command, I will intercept it and give you the internal data.
 When you have all the info, or if you don't need a command, just reply normally to the user. Do NOT wrap commands in backticks.`;
@@ -771,11 +774,11 @@ When you have all the info, or if you don't need a command, just reply normally 
           if (responseText.includes("[Type SEARCH: About D'H7]")) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
-            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (About D'H7):\nTo have a D'H7 account you need: An D'H7 email address: assistant@dh7.tf. A TFID: TF-4352071.\n### D'H7 User-Facing Features:\n- Multimedia Messaging: Send text, images, videos, files.\n- User Directory: Search for friends, view public profiles.\n- Profile Customization: Edit profile pictures.\n- Official Announcements: Receive alerts." });
+            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (About D'H7):\nTo have a D'H7 account you need: An D'H7 address dh7 : assistant@dh7.tf. A TFID: TF-4352071.\n### D'H7 User-Facing Features:\n- Multimedia Messaging: Send text, images, videos, files.\n- User Directory: Search for friends, view public profiles.\n- Profile Customization: Edit profile pictures.\n- Official Announcements: Receive alerts." });
           } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
-            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nUse [Type CHECK: TFID] to read a user's messages. If they break rules (offensive, spam), use [Type SPAM: TFID] for 24h ban, or [Type BAN: TFID] for permanent ban. Then inform the user who requested it." });
+            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nUse [Type CHECK: TFID] to read a user's messages. If they break rules (if he does not respect the rules of use of the messaging service), use [Type SPAM: TFID] for 24h ban, or [Type BAN: TFID] for permanent ban. Then inform the user who requested it. You can permanently ban a user or apply a 24-hour spam ban if they violate H7 usage rules." });
           } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
