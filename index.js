@@ -195,7 +195,7 @@ async function ensureStorageHealth() {
   if (!aiUserExists) {
     await User.create({
       tfid: 'TF-4352071',
-      nom: "AI.Adam_D'H7",
+      nom: "Assistant",
       prenom: '',
       dh7: 'ai.adamdh7@dh7.tf',
       age: '0',
