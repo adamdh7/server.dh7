@@ -83,7 +83,7 @@ function sanitizeUser(u) {
   const { password, ...rest } = obj;
   
   if (!rest.logo) {
-    rest.logo = 'https://adamdh7.org/adamdh7.png';
+    rest.logo = '';
   }
   
   if (rest.age && rest.age.length >= 4) {
