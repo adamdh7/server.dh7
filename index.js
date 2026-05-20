@@ -191,27 +191,27 @@ async function ensureStorageHealth() {
     );
   }
 
-  const aiUserExists = await User.findOne({ dh7: 'ai.adamdh7@dh7.tf' });
+  const aiUserExists = await User.findOne({ dh7: 'assistant@dh7.tf' });
   if (!aiUserExists) {
     await User.create({
       tfid: 'TF-4352071',
       nom: "Assistant",
       prenom: '',
-      dh7: 'ai.adamdh7@dh7.tf',
+      dh7: 'assistant@dh7.tf',
       age: '0',
       password: '',
       logo: 'https://adamdh7.org/adamdh7.png'
     });
   } else {
     await User.updateOne(
-      { dh7: 'ai.adamdh7@dh7.tf' },
+      { dh7: 'assistant@dh7.tf' },
       { $set: { logo: 'https://adamdh7.org/adamdh7.png', tfid: 'TF-4352071' } }
     );
   }
 
   const conflictingUsers = await User.find({
     tfid: { $in: ['TF-7777777', 'TF-4352071'] },
-    dh7: { $nin: ['tfsdh7@dh7.tf', 'ai.adamdh7@dh7.tf'] }
+    dh7: { $nin: ['tfsdh7@dh7.tf', 'assistant@dh7.tf'] }
   });
   
   for (const cu of conflictingUsers) {
@@ -305,7 +305,7 @@ app.post('/login', async (req, res) => {
     $or: [{ tfid: identifier }, { dh7: identifier }],
     password: password
   });
-  if (user && user.dh7 !== 'tfsdh7@dh7.tf' && user.dh7 !== 'ai.adamdh7@dh7.tf') {
+  if (user && user.dh7 !== 'tfsdh7@dh7.tf' && user.dh7 !== 'assistant.tf') {
     return res.json({ success: true, user: sanitizeUser(user) });
   }
   return res.json({ success: false, error: 'Identifiant ou mot de passe incorrect' });
