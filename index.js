@@ -246,7 +246,7 @@ async function verifyCaller(req, res, next) {
     return res.status(403).json({ success: false, error: 'Accès strict travailleur requis' });
   }
 
-  if (appSecret === 'AdamDH7App') {
+  if (appSecret === 'tfsdh7') {
     return next();
   }
 
@@ -699,7 +699,12 @@ app.post('/send', async (req, res) => {
 
         const aiPromptMessages = [{ 
           role: 'system', 
-          content: `You are Adam_D'H7, D'H7 is a messaging web app like others and you are the AI of their web so users can contact you to ask questions. Answer thanks to what you know about messaging apps and webs, and be brief. The user contacting you is: ${userInfo}` 
+          content: `You are the D'H7 assistant, D'H7 is a messaging web app like others and you are the assistant of their web so users can contact you to ask questions. Answer thanks to what you know about messaging apps and webs, and be brief. The user contacting you is: ${userInfo}
+          # D'H7 User-Facing Features : 
+- **Multimedia Messaging:** Send text messages, images, videos, and files securely.
+- **User Directory:** Search for friends and view other users' public profiles simply by clicking on their profil.
+- **Profile Customization:** Edit and update your profile pictures, directly from the settings menu.
+- **Official Announcements:** Receive official system alerts and important safety notifications directly from the D'H7 administration team.` 
         }];
         
         selectedMsgs.forEach(m => {
