@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 
 const ALLOWED_ORIGINS = new Set(['https://dh7.dh7.adamdh7.org', 'https://dh7.adamdh7.org', 
 'https://ai.adamdh7.org', 'https://mizik.adamdh7.org',
-'https://server.ai.adamdh7.org',               'https://quiz.adamdh7.org', 'https://dh7test.adamdh7.org', 'https://www.adamdh7.org']);
+'https://server.ai.adamdh7.org', 'https://quiz.adamdh7.org', 'https://dh7test.adamdh7.org', 'https://www.adamdh7.org']);
 const ALLOWED_HOSTS = new Set(['dh7.adamdh7.org', 'quiz.adamdh7.org', 'ai.adamdh7.org', 'www.adamdh7.org']);
 const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
 
@@ -718,13 +718,16 @@ app.post('/send', async (req, res) => {
         }
 
         const systemInstructions = `You are the D'H7 assistant. The user contacting you is: ${userInfo}
-You can answer directly, OR you can use specific internal tools by outputting EXACTLY one of these commands on a single line:
+You can chat with the user normally.
+IF you need internal information or actions, output EXACTLY ONE of these commands on a single line, and NOTHING ELSE:
 [Type SEARCH: About D'H7]
 [Type SEARCH: Moderation Rules]
-[Type CHECK: TFID] (replace TFID with the user's ID to check their messages)
-[Type SPAM: TFID] (to restrict a user for 24h)
-[Type BAN: TFID] (to permanently ban a user)
-If you output a command, you must output nothing else. Wait for the system data. Do not wrap commands in backticks.`;
+[Type CHECK: TFID] (replace TFID with the user's ID)
+[Type SPAM: TFID] (restrict a user for 24h)
+[Type BAN: TFID] (permanently ban)
+
+If you output a command, I will intercept it and give you the internal data.
+When you have all the info, or if you don't need a command, just reply normally to the user. Do NOT wrap commands in backticks.`;
 
         let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
         
@@ -738,29 +741,43 @@ If you output a command, you must output nothing else. Wait for the system data.
         let aiLoopActive = true;
         let aiLoopCount = 0;
         let currentAiModel = '@cf/meta/llama-3-8b-instruct';
-        let finalResponseText = "Error !?";
+        let finalResponseText = "Je n'ai pas pu finaliser ma réponse, veuillez réessayer.";
 
-        while (aiLoopActive && aiLoopCount < 5) {
+        while (aiLoopActive && aiLoopCount < 6) {
           aiLoopCount++;
+          let aiRes;
           
-          const aiRes = await axios.post(
-            `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/${currentAiModel}`,
-            { messages: aiPromptMessages },
-            { headers: { 'Authorization': `Bearer ${process.env.CF_AI_TOKEN}` } }
-          );
+          try {
+            aiRes = await axios.post(
+              `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/${currentAiModel}`,
+              { messages: aiPromptMessages },
+              { headers: { 'Authorization': `Bearer ${process.env.CF_AI_TOKEN}` } }
+            );
+          } catch (apiError) {
+            if (currentAiModel !== '@cf/meta/llama-3-8b-instruct') {
+              currentAiModel = '@cf/meta/llama-3-8b-instruct';
+              aiRes = await axios.post(
+                `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/${currentAiModel}`,
+                { messages: aiPromptMessages },
+                { headers: { 'Authorization': `Bearer ${process.env.CF_AI_TOKEN}` } }
+              );
+            } else {
+              throw apiError;
+            }
+          }
           
           let responseText = aiRes.data.result.response.trim();
 
           if (responseText.includes("[Type SEARCH: About D'H7]")) {
-            currentAiModel = '@cf/meta/llama-3-70b-instruct';
+            currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
-            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (About D'H7):\nTo have a D'H7 account you need: An D'H7 email address: assistant@dh7.tf. A TFID: TF-4352071.\nD'H7 User-Facing Features: Multimedia Messaging, User Directory, Profile Customization, Official Announcements." });
+            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (About D'H7):\nTo have a D'H7 account you need: An D'H7 email address: assistant@dh7.tf. A TFID: TF-4352071.\n### D'H7 User-Facing Features:\n- Multimedia Messaging: Send text, images, videos, files.\n- User Directory: Search for friends, view public profiles.\n- Profile Customization: Edit profile pictures.\n- Official Announcements: Receive alerts." });
           } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
-            currentAiModel = '@cf/meta/llama-3-70b-instruct';
+            currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
-            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nTo check a user's behavior, use [Type CHECK: TFID]. If the user is highly offensive, use [Type BAN: TFID]. If they spam, use [Type SPAM: TFID]." });
+            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nUse [Type CHECK: TFID] to read a user's messages. If they break rules (offensive, spam), use [Type SPAM: TFID] for 24h ban, or [Type BAN: TFID] for permanent ban. Then inform the user who requested it." });
           } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
-            currentAiModel = '@cf/meta/llama-3-70b-instruct';
+            currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
             const targetId = match[1].trim();
             aiPromptMessages.push({ role: 'assistant', content: `[Type CHECK: ${targetId}]` });
@@ -771,13 +788,13 @@ If you output a command, you must output nothing else. Wait for the system data.
                 $or: [{ from: targetUserObj.tfid }, { to: targetUserObj.tfid }]
               }).sort({ time: -1 }).limit(30);
               let combinedText = histMsgs.map(m => `[${m.time}] From ${m.from} To ${m.to}: ${m.text}`).join('\n');
-              if (combinedText.length > 17000) combinedText = combinedText.substring(0, 17000) + '...';
+              if (combinedText.length > 15000) combinedText = combinedText.substring(0, 15000) + '...';
               aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA (Messages for ${targetId}):\n${combinedText || 'No messages.'}` });
             } else {
               aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
             }
           } else if (responseText.match(/\[Type BAN:\s*([^\]]+)\]/i)) {
-            currentAiModel = '@cf/meta/llama-3-70b-instruct';
+            currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             const match = responseText.match(/\[Type BAN:\s*([^\]]+)\]/i);
             const targetId = match[1].trim();
             aiPromptMessages.push({ role: 'assistant', content: `[Type BAN: ${targetId}]` });
@@ -792,12 +809,12 @@ If you output a command, you must output nothing else. Wait for the system data.
                 time: new Date().toISOString(),
                 read: false
               });
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been BANNED successfully.` });
+              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been BANNED successfully. Please confirm to the user.` });
             } else {
               aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
             }
           } else if (responseText.match(/\[Type SPAM:\s*([^\]]+)\]/i)) {
-            currentAiModel = '@cf/meta/llama-3-70b-instruct';
+            currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             const match = responseText.match(/\[Type SPAM:\s*([^\]]+)\]/i);
             const targetId = match[1].trim();
             aiPromptMessages.push({ role: 'assistant', content: `[Type SPAM: ${targetId}]` });
@@ -814,11 +831,16 @@ If you output a command, you must output nothing else. Wait for the system data.
                 time: new Date().toISOString(),
                 read: false
               });
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been marked as SPAM successfully for 24h.` });
+              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been marked as SPAM successfully for 24h. Please confirm to the user.` });
             } else {
               aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
             }
           } else {
+            finalResponseText = responseText;
+            aiLoopActive = false;
+          }
+
+          if (aiLoopActive && aiLoopCount >= 5) {
             finalResponseText = responseText;
             aiLoopActive = false;
           }
@@ -834,10 +856,11 @@ If you output a command, you must output nothing else. Wait for the system data.
         await aiReply.save();
         
       } catch (e) {
+        const errorMsg = e.message ? ` (Erreur interne: ${e.message})` : '';
         const errorReply = new Message({
           from: 'TF-4352071',
           to: sender_tfid,
-          text: "Error !?",
+          text: "Je n'arrive pas à me connecter aux serveurs de traitement pour le moment." + errorMsg,
           time: new Date(Date.now() + 10).toISOString(),
           read: false
         });
