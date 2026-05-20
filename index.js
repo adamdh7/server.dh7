@@ -486,7 +486,7 @@ app.post('/DH7', async (req, res) => {
   if (user === 'All') {
     const allUsers = await User.find({
       tfid: { $nin: ['TF-7777777', 'TF-4352071'] },
-      dh7: { $nin: ['tfsdh7@dh7.tf', 'ai.adamdh7@dh7.tf'] }
+      dh7: { $nin: ['tfsdh7@dh7.tf', 'assistant@dh7.tf'] }
     });
     
     const systemMessages = allUsers.map(u => ({
@@ -647,7 +647,7 @@ app.post('/send', async (req, res) => {
     return res.json({ success: true });
   }
 
-  if (receiver_tfid === 'ai.adamdh7@dh7.tf' || receiver_tfid === 'TF-4352071') {
+  if (receiver_tfid === 'assistant@dh7.tf' || receiver_tfid === 'TF-4352071') {
     if (sender_tfid === 'TF-4352071') {
       return res.json({ success: false, error: 'Erreur AI' });
     }
@@ -700,7 +700,10 @@ app.post('/send', async (req, res) => {
         const aiPromptMessages = [{ 
           role: 'system', 
           content: `You are the D'H7 assistant, D'H7 is a messaging web app like others and you are the assistant of their web so users can contact you to ask questions. Answer thanks to what you know about messaging apps and webs, and be brief. The user contacting you is: ${userInfo}
-          # D'H7 User-Facing Features : 
+          To have a D'H7 account you need:
+An D'H7 email address: assistant@dh7.tf
+A TFID: TF-4352071.
+          ### D'H7 User-Facing Features, If something is not written below it cannot be done on D'H7, everything is specified below : 
 - **Multimedia Messaging:** Send text messages, images, videos, and files securely.
 - **User Directory:** Search for friends and view other users' public profiles simply by clicking on their profil.
 - **Profile Customization:** Edit and update your profile pictures, directly from the settings menu.
