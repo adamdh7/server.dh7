@@ -200,12 +200,12 @@ async function ensureStorageHealth() {
       dh7: 'assistant@dh7.tf',
       age: '0',
       password: '',
-      logo: 'https://adamdh7.org/adamdh7.png'
+      logo: 'https://dh7.adamdh7.org/DH72.png'
     });
   } else {
     await User.updateOne(
       { dh7: 'assistant@dh7.tf' },
-      { $set: { logo: 'https://adamdh7.org/adamdh7.png', tfid: 'TF-4352071' } }
+      { $set: { logo: 'https://dh7.adamdh7.org/DH72.png', tfid: 'TF-4352071' } }
     );
   }
 
