@@ -11,7 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const ALLOWED_ORIGINS = new Set([
-  'https://dh7.dh7.adamdh7.org', 
+  'http://localhost:7000', 
   'https://dh7.adamdh7.org', 
   'https://ai.adamdh7.org', 
   'https://mizik.adamdh7.org',
