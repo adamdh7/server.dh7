@@ -746,7 +746,7 @@ Pour déclencher une action interne, tu dois écrire EXACTEMENT l'une de ces lig
 [Type SPAM: TFID] (restreint un utilisateur pour une durée de 24 heures en écriture)
 [Type BAN: TFID] (bannit définitivement l'utilisateur de la plateforme D'H7)
 
-Une fois que tu as obtenu les données internes nécessaires, ou si la situation ne requiert aucune méthode interne, réponds simplement et normalement à l'utilisateur d'un ton courtois et professionnel en tant qu'Assistant.`;
+Une fois que tu as obtenu les données internes nécessaires, ou si la situation ne requiert aucune méthode interne, réponds simplement et normalement à l'utilisateur en tant qu'Assistant.`;
 
         let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
         
