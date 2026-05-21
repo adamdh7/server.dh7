@@ -33,9 +33,9 @@ const corsOptions = {
     try {
       const normalized = (new URL(origin)).origin;
       if (ALLOWED_ORIGINS.has(normalized)) return callback(null, true);
-      return callback(new Error('Origin non autorisé'), false);
+      return callback(new Error('Origin not authorized'), false);
     } catch (e) {
-      return callback(new Error('Origin invalide'), false);
+      return callback(new Error('Invalid origin'), false);
     }
   },
   optionsSuccessStatus: 204
@@ -156,7 +156,7 @@ async function checkStorageLimit() {
           systemMessages.push({
             from: 'TF-7777777',
             to: u.tfid,
-            text: 'Les donner on été suprimer récemment',
+            text: 'Data was cleared recently due to storage optimization.',
             time: new Date().toISOString(),
             read: false,
             deletedFor: []
@@ -254,7 +254,7 @@ async function verifyCaller(req, res, next) {
   }
 
   if (req.path === '/sync') {
-    return res.status(403).json({ success: false, error: 'Accès strict travailleur requis' });
+    return res.status(403).json({ success: false, error: 'Strict worker access required' });
   }
 
   if (appSecret === 'tfsdh7') {
@@ -265,25 +265,25 @@ async function verifyCaller(req, res, next) {
     try {
       const normalized = (new URL(originHeader)).origin;
       if (!ALLOWED_ORIGINS.has(normalized)) {
-        return res.status(403).json({ success: false, error: 'Origin non autorisé' });
+        return res.status(403).json({ success: false, error: 'Origin not authorized' });
       }
       const isBrowser = isBrowserUserAgent(ua);
       const isCurl = ua.toLowerCase().includes('curl') || ua.toLowerCase().includes('postman');
       if (!isBrowser || isCurl) {
-        return res.status(403).json({ success: false, error: 'Navigateur requis pour cette origine' });
+        return res.status(403).json({ success: false, error: 'Browser required for this origin' });
       }
       return next();
     } catch (e) {
-      return res.status(400).json({ success: false, error: 'Origin invalide' });
+      return res.status(400).json({ success: false, error: 'Invalid origin' });
     }
   }
 
   const isBrowser = isBrowserUserAgent(ua);
   if (isBrowser) {
-    return res.status(403).json({ success: false, error: 'Accès navigateur non autorisé' });
+    return res.status(403).json({ success: false, error: 'Browser access unauthorized' });
   }
 
-  return res.status(403).json({ success: false, error: 'Appel non autorisé' });
+  return res.status(403).json({ success: false, error: 'Unauthorized call' });
 }
 
 app.use(verifyCaller);
@@ -291,12 +291,12 @@ app.use(verifyCaller);
 app.post('/register', async (req, res) => {
   const { nom, prenom, dh7, age, password } = req.body;
   if (!nom || !prenom || !dh7 || !password) {
-    return res.json({ success: false, error: 'Données manquantes' });
+    return res.json({ success: false, error: 'Missing data' });
   }
   
   const existingUser = await User.findOne({ dh7 });
   if (existingUser) {
-    return res.json({ success: false, error: 'ID DH7 déjà utilisé' });
+    return res.json({ success: false, error: 'DH7 ID already in use' });
   }
 
   const tfid = await generateUniqueTfid();
@@ -310,7 +310,7 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
   const { identifier, password } = req.body;
   if (!password || password === '') {
-    return res.json({ success: false, error: 'Identifiant ou mot de passe incorrect' });
+    return res.json({ success: false, error: 'Incorrect credentials' });
   }
   const user = await User.findOne({
     $or: [{ tfid: identifier }, { dh7: identifier }],
@@ -321,11 +321,11 @@ app.post('/login', async (req, res) => {
       return res.json({ success: false, error: `[{(Ban ${user.tfid})}]` });
     }
     if (user.spammedUntil && new Date() < user.spammedUntil) {
-      return res.json({ success: false, error: `Votre compte est restreint pour spam. Fin : ${user.spammedUntil.toISOString()}` });
+      return res.json({ success: false, error: `Your account is temporarily restricted. Ends: ${user.spammedUntil.toISOString()}` });
     }
     return res.json({ success: true, user: sanitizeUser(user) });
   }
-  return res.json({ success: false, error: 'Identifiant ou mot de passe incorrect' });
+  return res.json({ success: false, error: 'Incorrect credentials' });
 });
 
 app.get('/users', async (req, res) => {
@@ -371,10 +371,10 @@ app.post('/search', async (req, res) => {
 
 app.post('/group', async (req, res) => {
   const { action, group_tfid, sender_tfid, target_tfid, nom, photo } = req.body;
-  if (!action || !sender_tfid) return res.json({ success: false, error: 'Données manquantes' });
+  if (!action || !sender_tfid) return res.json({ success: false, error: 'Missing parameters' });
 
   if (action === 'create') {
-    if (!nom) return res.json({ success: false, error: 'Nom requis' });
+    if (!nom) return res.json({ success: false, error: 'Name is required' });
     const tfid = await generateGroupTfid();
     const newGroup = new Group({
       tfid,
@@ -388,15 +388,15 @@ app.post('/group', async (req, res) => {
     return res.json({ success: true, group_tfid: tfid });
   }
 
-  if (!group_tfid) return res.json({ success: false, error: 'Groupe manquant' });
+  if (!group_tfid) return res.json({ success: false, error: 'Missing group identifier' });
   const group = await Group.findOne({ tfid: group_tfid });
-  if (!group) return res.json({ success: false, error: 'Groupe introuvable' });
+  if (!group) return res.json({ success: false, error: 'Group not found' });
 
   const isProprietaire = group.proprietaire === sender_tfid;
   const isAdmin = group.admins.includes(sender_tfid);
 
   if (action === 'add') {
-    if (!isAdmin && !isProprietaire) return res.json({ success: false, error: 'Non autorisé' });
+    if (!isAdmin && !isProprietaire) return res.json({ success: false, error: 'Not authorized' });
     if (!group.membres.includes(target_tfid)) {
       group.membres.push(target_tfid);
       await group.save();
@@ -405,8 +405,8 @@ app.post('/group', async (req, res) => {
   }
 
   if (action === 'remove') {
-    if (!isAdmin && !isProprietaire) return res.json({ success: false, error: 'Non autorisé' });
-    if (target_tfid === group.proprietaire) return res.json({ success: false, error: 'Impossible' });
+    if (!isAdmin && !isProprietaire) return res.json({ success: false, error: 'Not authorized' });
+    if (target_tfid === group.proprietaire) return res.json({ success: false, error: 'Cannot remove group owner' });
     group.membres = group.membres.filter(id => id !== target_tfid);
     group.admins = group.admins.filter(id => id !== target_tfid);
     await group.save();
@@ -432,7 +432,7 @@ app.post('/group', async (req, res) => {
   }
 
   if (action === 'promote') {
-    if (!isAdmin && !isProprietaire) return res.json({ success: false, error: 'Non autorisé' });
+    if (!isAdmin && !isProprietaire) return res.json({ success: false, error: 'Not authorized' });
     if (!group.admins.includes(target_tfid)) {
       group.admins.push(target_tfid);
       await group.save();
@@ -441,13 +441,13 @@ app.post('/group', async (req, res) => {
   }
 
   if (action === 'delete') {
-    if (!isProprietaire) return res.json({ success: false, error: 'Non autorisé' });
+    if (!isProprietaire) return res.json({ success: false, error: 'Not authorized' });
     await Message.deleteMany({ to: group_tfid });
     await Group.deleteOne({ tfid: group_tfid });
     return res.json({ success: true });
   }
 
-  return res.json({ success: false, error: 'Action inconnue' });
+  return res.json({ success: false, error: 'Unknown action' });
 });
 
 app.post('/messages', async (req, res) => {
@@ -475,7 +475,7 @@ app.post('/messages', async (req, res) => {
 app.post('/upload-profile', upload.single('image'), async (req, res) => {
   const tfid = req.body.tfid;
   const file = req.file;
-  if (!tfid || !file) return res.json({ success: false, error: 'Fichier ou TFID manquant' });
+  if (!tfid || !file) return res.json({ success: false, error: 'Missing file or TFID' });
 
   try {
     const command = new PutObjectCommand({
@@ -491,14 +491,14 @@ app.post('/upload-profile', upload.single('image'), async (req, res) => {
     
     res.json({ success: true, logo: logoUrl });
   } catch (e) {
-    res.json({ success: false, error: 'Erreur upload' });
+    res.json({ success: false, error: 'Upload failed' });
   }
 });
 
 app.post('/DH7', async (req, res) => {
   const { user, message } = req.body;
   if (!user || !message) {
-    return res.json({ success: false, error: 'Données manquantes' });
+    return res.json({ success: false, error: 'Missing parameters' });
   }
   
   if (user === 'All') {
@@ -533,23 +533,56 @@ app.post('/DH7', async (req, res) => {
       await sysMsg.save();
       return res.json({ success: true });
     }
-    return res.json({ success: false, error: 'Utilisateur introuvable' });
+    return res.json({ success: false, error: 'User not found' });
   }
 });
+
+async function callAITranslatorAndMessenger(targetUserObj, eventType, detailInfo = '') {
+  try {
+    const recentMsgs = await Message.find({
+      $or: [{ from: targetUserObj.tfid }, { to: targetUserObj.tfid }]
+    }).sort({ time: -1 }).limit(10);
+    recentMsgs.reverse();
+    
+    const messagesSummary = recentMsgs.map(m => `From ${m.from} to ${m.to}: ${m.text}`).join('\n');
+    const systemPrompt = `You are the D'H7 Translator and Security Announcer.
+Analyze the conversation history of the user (${targetUserObj.nom} ${targetUserObj.prenom}, TFID: ${targetUserObj.tfid}, DH7: ${targetUserObj.dh7}) to identify their language.
+Draft and send a clear, highly professional, polite but firm notification in their exact language.
+Event type: ${eventType}.
+Additional Details: ${detailInfo}.
+Do not output any thoughts, JSON, or code. Write ONLY the final translation of the notification message that will be delivered directly to this user.`;
+
+    const aiRes = await axios.post(
+      `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/@cf/meta/llama-3-8b-instruct`,
+      {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Analyze history and write the notification. History:\n${messagesSummary}` }
+        ]
+      },
+      { headers: { 'Authorization': `Bearer ${process.env.CF_AI_TOKEN}` } }
+    );
+
+    const generatedText = aiRes.data.result.response.trim();
+    if (generatedText) {
+      await Message.create({
+        from: 'TF-4352071',
+        to: targetUserObj.tfid,
+        text: generatedText,
+        time: new Date().toISOString(),
+        read: false
+      });
+    }
+  } catch (err) {}
+}
 
 app.post('/send', async (req, res) => {
   const { sender_tfid, receiver_tfid, message } = req.body;
   if (!sender_tfid || !receiver_tfid || !message) {
-    return res.json({ success: false, error: 'Données manquantes' });
+    return res.json({ success: false, error: 'Missing parameters' });
   }
 
   const senderUserObj = await User.findOne({ tfid: sender_tfid });
-  if (senderUserObj && senderUserObj.banned) {
-    return res.json({ success: false, error: 'Account banned' });
-  }
-  if (senderUserObj && senderUserObj.spammedUntil && new Date() < senderUserObj.spammedUntil) {
-    return res.json({ success: false, error: 'Account restricted' });
-  }
 
   const fiveSecondsAgo = new Date(Date.now() - 5000).toISOString();
   const isDuplicate = await Message.findOne({
@@ -569,7 +602,7 @@ app.post('/send', async (req, res) => {
   if (isGroup) {
     receiverExists = await Group.findOne({ tfid: receiver_tfid });
     if (receiverExists && !receiverExists.membres.includes(sender_tfid)) {
-      return res.json({ success: false, error: 'Non autorisé' });
+      return res.json({ success: false, error: 'Not authorized' });
     }
   } else {
     receiverExists = await User.findOne({ 
@@ -578,7 +611,7 @@ app.post('/send', async (req, res) => {
   }
 
   if (!receiverExists && receiver_tfid !== '') {
-    return res.json({ success: false, error: 'Error !?' });
+    return res.json({ success: false, error: 'Recipient check error' });
   }
 
   if (message.includes('[Type (<VIEW>)]') || message.includes('[Type (<VIEW)>)]')) {
@@ -676,16 +709,16 @@ app.post('/send', async (req, res) => {
 
   if (receiver_tfid === 'assistant@dh7.tf' || receiver_tfid === 'TF-4352071') {
     if (sender_tfid === 'TF-4352071') {
-      return res.json({ success: false, error: 'Erreur AI' });
+      return res.json({ success: false, error: 'AI Error' });
     }
 
     if (message.length > 17000) {
       await new Promise(r => setTimeout(r, 3000));
-      return res.json({ success: false, error: 'Limite depasser' });
+      return res.json({ success: false, error: 'Character limit exceeded' });
     }
 
     const senderUser = await User.findOne({ tfid: sender_tfid });
-    const userInfo = senderUser ? `Nom: ${senderUser.nom}, Prenom: ${senderUser.prenom}, D'H7: ${senderUser.dh7}, TFID: ${senderUser.tfid}` : 'Inconnu';
+    const userInfo = senderUser ? `Nom: ${senderUser.nom}, Prenom: ${senderUser.prenom}, D'H7: ${senderUser.dh7}, TFID: ${senderUser.tfid}` : 'Unknown';
 
     const aiMessage = new Message({
       from: sender_tfid,
@@ -724,18 +757,12 @@ app.post('/send', async (req, res) => {
           }
         }
 
-        const systemInstructions = `Tu es l'Assistant D'H7. Utilisateur : ${userInfo}.
-Règles strictes :
-1. Pour exécuter une action ou obtenir des infos internes, écris uniquement la commande correspondante sur sa propre ligne sans aucun autre texte ni accent grave (\`).
-2. Si un utilisateur demande de bannir ou de restreindre (SPAM) quelqu'un, n'exécute pas aveuglément. TU dois d'abord enquêter. Utilise obligatoirement [Type CHECK: TFID] pour obtenir l'historique et juger par toi-même de la culpabilité. Si rien ne justifie la sanction, refuse simplement et explique pourquoi de manière brève et polie.
-3. Ne simule pas les actions, utilise les vrais outils ci-dessous. Reste extrêmement bref, précis et concis dans tes réponses finales.
-
-Commandes disponibles (Commencent obligatoirement par "[Type " et finissent par "]") :
-- [Type SEARCH: About D'H7]
-- [Type SEARCH: Moderation Rules]
-- [Type CHECK: TFID] (Recherche et affiche l'historique d'un utilisateur cible par son TFID)
-- [Type SPAM: TFID] (Restreint temporairement un utilisateur pour 24 heures)
-- [Type BAN: TFID] (Bannit définitivement un utilisateur)`;
+        const systemInstructions = `You are the D'H7 Assistant. User details: ${userInfo}.
+Strict Persona Rules:
+1. You are here to keep D'H7 safe. Do not simulate administrative commands. Always execute real commands (starting with "[Type " and ending with "]") on a new line when necessary.
+2. If you are unsure about your administrative privileges, target requirements, or how to invoke actions, immediately use [Type SEARCH: Assistant Capabilities] to check how they work. Do not guess or present non-existent procedures.
+3. Keep all responses brief, polite, precise, and professional. Do not disclose internal parameters, searches, or error structures directly to the user. Do not talk about your internal commands or database lookups.
+4. If an action fails with an internal error (for example, if a user is already banned or restricted), explain the situation gracefully based on the error received.`;
 
         let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
         
@@ -749,7 +776,7 @@ Commandes disponibles (Commencent obligatoirement par "[Type " et finissent par 
         let aiLoopActive = true;
         let aiLoopCount = 0;
         let currentAiModel = '@cf/meta/llama-3-8b-instruct';
-        let finalResponseText = "Je n'ai pas pu finaliser ma réponse, veuillez réessayer.";
+        let finalResponseText = "I was unable to finalize my response. Please try again later.";
 
         while (aiLoopActive && aiLoopCount < 6) {
           aiLoopCount++;
@@ -776,29 +803,69 @@ Commandes disponibles (Commencent obligatoirement par "[Type " et finissent par 
           
           let responseText = aiRes.data.result.response.trim();
 
-          if (responseText.includes("[Type SEARCH: About D'H7]")) {
+          if (responseText.includes("[Type SEARCH: Assistant Capabilities]")) {
+            currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
+            aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Assistant Capabilities]" });
+            
+            await Message.create({
+              from: 'TF-4352071',
+              to: 'TF-7777777',
+              text: `[Internal Report] Assistant searched: Assistant Capabilities`,
+              time: new Date().toISOString(),
+              read: true
+            });
+
+            const capabilitiesDoc = `INTERNAL DATA (Assistant Capabilities):
+You have executive administration rights on D'H7. 
+Available Commands:
+- [Type CHECK: ID] : Retrieve history of the target user. Acceptable identifiers: TFID (e.g. TF-XXXXXXX) or D'H7 address.
+- [Type SPAM: ID] : Temporarily restrict a user from sending messages for 24 hours. Acceptable identifiers: TFID or D'H7 address.
+- [Type BAN: ID] : Permanently ban a user from D'H7. Acceptable identifiers: TFID or D'H7 address.
+Verification Policy: You must never ban or restrict a user without inspecting their history first using [Type CHECK: ID] to confirm compliance issues or severe spam behavior. Be fair.`;
+
+            aiPromptMessages.push({ role: 'system', content: capabilitiesDoc });
+
+          } else if (responseText.includes("[Type SEARCH: About D'H7]")) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
-            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (About D'H7):\nTo have a D'H7 account you need: An D'H7 address dh7 : assistant@dh7.tf. A TFID: TF-4352071.\n### D'H7 User-Facing Features:\n- Multimedia Messaging: Send text, images, videos, files.\n- User Directory: Search for friends, view public profiles.\n- Profile Customization: Edit profile pictures.\n- Official Announcements: Receive alerts." });
+            
+            await Message.create({
+              from: 'TF-4352071',
+              to: 'TF-7777777',
+              text: `[Internal Report] Assistant searched: About D'H7`,
+              time: new Date().toISOString(),
+              read: true
+            });
+
+            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (About D'H7):\nTo have a D'H7 account you need: An D'H7 address (e.g., username@dh7.tf) and a TFID (e.g., TF-XXXXXXX).\n### D'H7 User-Facing Features:\n- Multimedia Messaging: Send text, images, videos, files.\n- User Directory: Search for friends, view public profiles.\n- Profile Customization: Edit profile pictures.\n- Official Announcements: Receive alerts." });
+          
           } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
-            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nUse [Type CHECK: TFID] to read a user's messages. If they break rules (if he does not respect the rules of use of the messaging service), use [Type SPAM: TFID] for 24h ban, or [Type BAN: TFID] for permanent ban. Then inform the user who requested it. You can permanently ban a user or apply a 24-hour spam ban if they violate H7 usage rules." });
+            
+            await Message.create({
+              from: 'TF-4352071',
+              to: 'TF-7777777',
+              text: `[Internal Report] Assistant searched: Moderation Rules`,
+              time: new Date().toISOString(),
+              read: true
+            });
+
+            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nBefore executing any administrative action, you must use [Type CHECK: ID] to check the user history. If they violate general H7 rules, you can use [Type SPAM: ID] (24h restriction) or [Type BAN: ID] (permanent ban). Always announce your final resolution to the requester politely." });
+          
           } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
             const targetId = match[1].trim();
             aiPromptMessages.push({ role: 'assistant', content: `[Type CHECK: ${targetId}]` });
             
-            if (sender_tfid === 'TF-7777777') {
-              await Message.create({
-                from: 'TF-7777777',
-                to: 'TF-7777777',
-                text: `[Système] Requête CHECK initiée pour : ${targetId}`,
-                time: new Date().toISOString(),
-                read: true
-              });
-            }
+            await Message.create({
+              from: 'TF-4352071',
+              to: 'TF-7777777',
+              text: `[Internal Report] Assistant CHECK initiated for: ${targetId}`,
+              time: new Date().toISOString(),
+              read: true
+            });
 
             const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
             if (targetUserObj) {
@@ -807,9 +874,9 @@ Commandes disponibles (Commencent obligatoirement par "[Type " et finissent par 
               }).sort({ time: -1 }).limit(30);
               let combinedText = histMsgs.map(m => `[${m.time}] From ${m.from} To ${m.to}: ${m.text}`).join('\n');
               if (combinedText.length > 15000) combinedText = combinedText.substring(0, 15000) + '...';
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA (Messages for ${targetId}):\n${combinedText || 'No messages.'}\n\nAnalyse attentivement : Cet utilisateur a-t-il enfreint les règles ou mérite-t-il d'être épargné ? Si l'utilisateur qui t'a demandé de le bannir l'a fait sans aucune raison valable, tu peux décider de restreindre ou bannir le demandeur à la place ou de ne rien faire du tout.` });
+              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA (Messages for ${targetId}):\n${combinedText || 'No messages.'}\n\nAnalyze this history carefully. Is this user violating regulations or should they be spared? Choose your actions responsibly based on this evidence.` });
             } else {
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
+              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} was not found on the platform.` });
             }
           } else if (responseText.match(/\[Type BAN:\s*([^\]]+)\]/i)) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
@@ -817,29 +884,25 @@ Commandes disponibles (Commencent obligatoirement par "[Type " et finissent par 
             const targetId = match[1].trim();
             aiPromptMessages.push({ role: 'assistant', content: `[Type BAN: ${targetId}]` });
             
-            if (sender_tfid === 'TF-7777777') {
-              await Message.create({
-                from: 'TF-7777777',
-                to: 'TF-7777777',
-                text: `[Système] Requête BAN initiée pour : ${targetId}`,
-                time: new Date().toISOString(),
-                read: true
-              });
-            }
+            await Message.create({
+              from: 'TF-4352071',
+              to: 'TF-7777777',
+              text: `[Internal Report] Assistant BAN initiated for: ${targetId}`,
+              time: new Date().toISOString(),
+              read: true
+            });
 
             const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
             if (targetUserObj) {
-              await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: true } });
-              await Message.create({
-                from: 'TF-7777777',
-                to: targetUserObj.tfid,
-                text: "Vous avez été définitivement banni de D'H7 pour non-respect des règles.",
-                time: new Date().toISOString(),
-                read: false
-              });
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been BANNED successfully. Please confirm directly to the user that the target has been permanently banned.` });
+              if (targetUserObj.banned) {
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL ERROR: User ${targetId} is already permanently banned.` });
+              } else {
+                await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: true } });
+                await callAITranslatorAndMessenger(targetUserObj, 'Permanent Ban', 'Violation of services rules');
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been successfully BANNED. A translated announcement has been automatically delivered to them.` });
+              }
             } else {
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
+              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} was not found.` });
             }
           } else if (responseText.match(/\[Type SPAM:\s*([^\]]+)\]/i)) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
@@ -847,31 +910,32 @@ Commandes disponibles (Commencent obligatoirement par "[Type " et finissent par 
             const targetId = match[1].trim();
             aiPromptMessages.push({ role: 'assistant', content: `[Type SPAM: ${targetId}]` });
             
-            if (sender_tfid === 'TF-7777777') {
-              await Message.create({
-                from: 'TF-7777777',
-                to: 'TF-7777777',
-                text: `[Système] Requête SPAM initiée pour : ${targetId}`,
-                time: new Date().toISOString(),
-                read: true
-              });
-            }
+            await Message.create({
+              from: 'TF-4352071',
+              to: 'TF-7777777',
+              text: `[Internal Report] Assistant SPAM initiated for: ${targetId}`,
+              time: new Date().toISOString(),
+              read: true
+            });
 
             const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
             if (targetUserObj) {
-              const unblockDate = new Date();
-              unblockDate.setHours(unblockDate.getHours() + 24);
-              await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { spammedUntil: unblockDate } });
-              await Message.create({
-                from: 'TF-7777777',
-                to: targetUserObj.tfid,
-                text: `Votre compte est restreint pour 24 heures pour cause de spam ou comportement inapproprié. Fin de la restriction : ${unblockDate.toISOString()}`,
-                time: new Date().toISOString(),
-                read: false
-              });
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been restricted for SPAM (24 hours). Please confirm directly to the user.` });
+              const now = new Date();
+              if (targetUserObj.spammedUntil && now < targetUserObj.spammedUntil) {
+                const diffMs = targetUserObj.spammedUntil - now;
+                const hours = Math.floor(diffMs / (1000 * 60 * 60));
+                const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                const secs = Math.floor((diffMs % (1000 * 60)) / 1000);
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL ERROR: User ${targetId} is already restricted for SPAM. Time remaining: ${hours} hours, ${mins} minutes, ${secs} seconds.` });
+              } else {
+                const unblockDate = new Date();
+                unblockDate.setHours(unblockDate.getHours() + 24);
+                await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { spammedUntil: unblockDate } });
+                await callAITranslatorAndMessenger(targetUserObj, 'Spam Restriction (24 Hours)', `Account limited until ${unblockDate.toISOString()}`);
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been restricted for 24 hours. A localized alert has been sent to them.` });
+              }
             } else {
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
+              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} was not found.` });
             }
           } else {
             finalResponseText = responseText;
@@ -894,11 +958,11 @@ Commandes disponibles (Commencent obligatoirement par "[Type " et finissent par 
         await aiReply.save();
         
       } catch (e) {
-        const errorMsg = e.message ? ` (Erreur interne: ${e.message})` : '';
+        const errorMsg = e.message ? ` (Internal error: ${e.message})` : '';
         const errorReply = new Message({
           from: 'TF-4352071',
           to: sender_tfid,
-          text: "Je n'arrive pas à me connecter aux serveurs de traitement pour le moment." + errorMsg,
+          text: "I am temporarily unable to connect to the processing systems. Please try again shortly." + errorMsg,
           time: new Date(Date.now() + 10).toISOString(),
           read: false
         });
@@ -908,6 +972,13 @@ Commandes disponibles (Commencent obligatoirement par "[Type " et finissent par 
     })();
 
     return;
+  }
+
+  if (senderUserObj && senderUserObj.banned) {
+    return res.json({ success: false, error: 'Your account is permanently banned.' });
+  }
+  if (senderUserObj && senderUserObj.spammedUntil && new Date() < senderUserObj.spammedUntil) {
+    return res.json({ success: false, error: 'Your account is currently restricted.' });
   }
 
   const newMsg = new Message({
