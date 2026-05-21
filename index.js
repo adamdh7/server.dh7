@@ -727,6 +727,11 @@ app.post('/send', async (req, res) => {
             { tfid: targetUserObj.tfid }, 
             { $set: { spammedUntil: null, spamCount: 0, lastSpammedAt: null } }
           );
+          await Message.deleteMany({
+            from: 'TF-7777777',
+            to: targetUserObj.tfid,
+            text: `[{[Type SPAM: ${targetUserObj.tfid}]}]`
+          });
           replyText = `[ADMIN UNSPAM SUCCESS]: User ${targetUserObj.tfid} spam restriction has been cleared. Spam count reset to 0.`;
         } else {
           replyText = `[ADMIN UNSPAM ERROR]: User ${targetId} not found.`;
@@ -739,6 +744,11 @@ app.post('/send', async (req, res) => {
             { tfid: targetUserObj.tfid }, 
             { $set: { banned: false, bannedAt: null, spamCount: 0, lastSpammedAt: null } }
           );
+          await Message.deleteMany({
+            from: 'TF-7777777',
+            to: targetUserObj.tfid,
+            text: `[{[Type BAN: ${targetUserObj.tfid}]}]`
+          });
           replyText = `[ADMIN UNBAN SUCCESS]: User ${targetUserObj.tfid} has been unbanned. Spam count reset to 0.`;
         } else {
           replyText = `[ADMIN UNBAN ERROR]: User ${targetId} not found.`;
@@ -1185,6 +1195,11 @@ Available Commands (Must be strictly formatted on their own line as "[Type COMMA
             const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
             if (targetUserObj) {
               await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { spammedUntil: null, spamCount: 0, lastSpammedAt: null } });
+              await Message.deleteMany({
+                from: 'TF-7777777',
+                to: targetUserObj.tfid,
+                text: `[{[Type SPAM: ${targetUserObj.tfid}]}]`
+              });
               aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been successfully unspammed.` });
             } else {
               aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
@@ -1199,6 +1214,11 @@ Available Commands (Must be strictly formatted on their own line as "[Type COMMA
             const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
             if (targetUserObj) {
               await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: false, bannedAt: null, spamCount: 0, lastSpammedAt: null } });
+              await Message.deleteMany({
+                from: 'TF-7777777',
+                to: targetUserObj.tfid,
+                text: `[{[Type BAN: ${targetUserObj.tfid}]}]`
+              });
               aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been successfully unbanned.` });
             } else {
               aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
