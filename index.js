@@ -149,7 +149,7 @@ async function checkStorageLimit() {
           systemMessages.push({
             from: 'TF-7777777',
             to: u.tfid,
-            text: 'Les donner on été suprimer récemment',
+            text: 'Les données ont été supprimées récemment',
             time: new Date().toISOString(),
             read: false,
             deletedFor: []
@@ -309,7 +309,7 @@ app.post('/login', async (req, res) => {
     $or: [{ tfid: identifier }, { dh7: identifier }],
     password: password
   });
-  if (user && user.dh7 !== 'tfsdh7@dh7.tf' && user.dh7 !== 'assistant.tf') {
+  if (user && user.dh7 !== 'tfsdh7@dh7.tf' && user.dh7 !== 'assistant@dh7.tf') {
     if (user.banned) {
       return res.json({ success: false, error: `[{(Ban ${user.tfid})}]` });
     }
@@ -717,20 +717,20 @@ app.post('/send', async (req, res) => {
           }
         }
 
-        const systemInstructions = `You are the D'H7 Assistant. The user contacting you is: ${userInfo}
-You can chat with the user normally.
-IF you need internal information or actions, output EXACTLY ONE of these commands on a single line, and NOTHING ELSE:D'
+        const systemInstructions = `Tu es l'Assistant IA officiel de D'H7. Utilisateur : ${userInfo}
 
-[Type SEARCH: About D'H7]
-[Type SEARCH: Moderation Rules]
-[Type CHECK: TFID] (replace TFID with the user's ID)
-[Type SPAM: TFID] (restrict a user for 24h)
-[Type BAN: TFID] (permanently ban)
+RÈGLES STRICTES DE MODÉRATION :
+1. LE FARDEAU DE LA PREUVE : Ne bannis ou ne spam JAMAIS sur simple demande. Tu DOIS ABSOLUMENT utiliser d'abord [Type CHECK: TFID] pour analyser les messages de la cible.
+2. SANCTIONNER L'ABUS : Si l'utilisateur actuel te demande de punir des innocents sans raison valable, ou te pose des questions inutiles en boucle pour te spammer, refuse catégoriquement. S'il abuse ou insiste, c'est LUI que tu dois sanctionner avec [Type BAN: ${sender_tfid}] ou [Type SPAM: ${sender_tfid}].
+3. AGIS VRAIMENT : Ne simule pas les actions dans le texte (ne dis pas "Je vais le bannir", fais-le). Envoie la commande exacte.
 
-You can permanently ban a user or apply a 24-hour spam ban if they violate D'H7 usage rules.
+FORMAT OBLIGATOIRE (Écris UNIQUEMENT la commande, avec les crochets, sans rien d'autre autour) :
+[Type CHECK: TFID]
+[Type BAN: TFID]
+[Type SPAM: TFID]
 
-If you output a command, I will intercept it and give you the internal data.
-When you have all the info, or if you don't need a command, just reply normally to the user. Do NOT wrap commands in backticks.`;
+RÉPONSE FINALE :
+Après réception des données internes (suite à un CHECK, BAN ou SPAM), confirme la conclusion à l'utilisateur de façon extrêmement brève, concise et directe.`;
 
         let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
         
@@ -778,13 +778,23 @@ When you have all the info, or if you don't need a command, just reply normally 
           } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
-            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nUse [Type CHECK: TFID] to read a user's messages. If they break rules (if he does not respect the rules of use of the messaging service), use [Type SPAM: TFID] for 24h ban, or [Type BAN: TFID] for permanent ban. Then inform the user who requested it. You can permanently ban a user or apply a 24-hour spam ban if they violate H7 usage rules." });
+            aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nUse [Type CHECK: TFID] to read a user's messages. If they break rules, use [Type SPAM: TFID] for 24h ban, or [Type BAN: TFID] for permanent ban. Confirm to user." });
           } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
             const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
             const targetId = match[1].trim();
             aiPromptMessages.push({ role: 'assistant', content: `[Type CHECK: ${targetId}]` });
             
+            if (sender_tfid === 'TF-7777777') {
+              await Message.create({
+                from: 'TF-7777777',
+                to: 'TF-7777777',
+                text: `[Requête IA initiée : CHECK sur le TFID ${targetId}]`,
+                time: new Date().toISOString(),
+                read: false
+              });
+            }
+
             const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
             if (targetUserObj) {
               const histMsgs = await Message.find({
@@ -792,9 +802,9 @@ When you have all the info, or if you don't need a command, just reply normally 
               }).sort({ time: -1 }).limit(30);
               let combinedText = histMsgs.map(m => `[${m.time}] From ${m.from} To ${m.to}: ${m.text}`).join('\n');
               if (combinedText.length > 15000) combinedText = combinedText.substring(0, 15000) + '...';
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA (Messages for ${targetId}):\n${combinedText || 'No messages.'}` });
+              aiPromptMessages.push({ role: 'system', content: `DONNEES INTERNES (Messages de ${targetId}):\n${combinedText || 'Aucun message.'}` });
             } else {
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
+              aiPromptMessages.push({ role: 'system', content: `DONNEES INTERNES: Utilisateur ${targetId} introuvable.` });
             }
           } else if (responseText.match(/\[Type BAN:\s*([^\]]+)\]/i)) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
@@ -802,6 +812,16 @@ When you have all the info, or if you don't need a command, just reply normally 
             const targetId = match[1].trim();
             aiPromptMessages.push({ role: 'assistant', content: `[Type BAN: ${targetId}]` });
             
+            if (sender_tfid === 'TF-7777777') {
+              await Message.create({
+                from: 'TF-7777777',
+                to: 'TF-7777777',
+                text: `[Requête IA initiée : BAN définitif sur le TFID ${targetId}]`,
+                time: new Date().toISOString(),
+                read: false
+              });
+            }
+
             const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
             if (targetUserObj) {
               await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: true } });
@@ -812,9 +832,9 @@ When you have all the info, or if you don't need a command, just reply normally 
                 time: new Date().toISOString(),
                 read: false
               });
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been BANNED successfully. Please confirm to the user.` });
+              aiPromptMessages.push({ role: 'system', content: `DONNEES INTERNES: L'utilisateur ${targetId} a été BANNI avec succès. Confirme brièvement la sanction à l'utilisateur actuel.` });
             } else {
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
+              aiPromptMessages.push({ role: 'system', content: `DONNEES INTERNES: Utilisateur ${targetId} introuvable.` });
             }
           } else if (responseText.match(/\[Type SPAM:\s*([^\]]+)\]/i)) {
             currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
@@ -822,6 +842,16 @@ When you have all the info, or if you don't need a command, just reply normally 
             const targetId = match[1].trim();
             aiPromptMessages.push({ role: 'assistant', content: `[Type SPAM: ${targetId}]` });
             
+            if (sender_tfid === 'TF-7777777') {
+              await Message.create({
+                from: 'TF-7777777',
+                to: 'TF-7777777',
+                text: `[Requête IA initiée : SPAM 24h sur le TFID ${targetId}]`,
+                time: new Date().toISOString(),
+                read: false
+              });
+            }
+
             const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
             if (targetUserObj) {
               const unblockDate = new Date();
@@ -834,9 +864,9 @@ When you have all the info, or if you don't need a command, just reply normally 
                 time: new Date().toISOString(),
                 read: false
               });
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been marked as SPAM successfully for 24h. Please confirm to the user.` });
+              aiPromptMessages.push({ role: 'system', content: `DONNEES INTERNES: L'utilisateur ${targetId} a été marqué comme SPAM (24h) avec succès. Confirme brièvement la sanction à l'utilisateur actuel.` });
             } else {
-              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
+              aiPromptMessages.push({ role: 'system', content: `DONNEES INTERNES: Utilisateur ${targetId} introuvable.` });
             }
           } else {
             finalResponseText = responseText;
