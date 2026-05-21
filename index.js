@@ -54,7 +54,9 @@ const userSchema = new mongoose.Schema({
   logo: { type: String, default: '' },
   banned: { type: Boolean, default: false },
   bannedAt: { type: Date, default: null },
-  spammedUntil: { type: Date, default: null }
+  spammedUntil: { type: Date, default: null },
+  spamCount: { type: Number, default: 0 },
+  lastSpammedAt: { type: Date, default: null }
 });
 const User = mongoose.model('User', userSchema);
 
@@ -626,6 +628,136 @@ app.post('/send', async (req, res) => {
     return res.json({ success: false, error: 'Missing data' });
   }
 
+  if (sender_tfid === 'TF-7777777') {
+    const checkMatch = message.match(/\[Type CHECK:\s*([^\]]+)\]/i);
+    const spamMatch = message.match(/\[Type SPAM:\s*([^\]]+)\]/i);
+    const banMatch = message.match(/\[Type BAN:\s*([^\]]+)\]/i);
+    const unspamMatch = message.match(/\[Type UNSPAM:\s*([^\]]+)\]/i);
+    const unbanMatch = message.match(/\[Type UNBAN:\s*([^\]]+)\]/i);
+
+    if (checkMatch || spamMatch || banMatch || unspamMatch || unbanMatch) {
+      const cmdMsg = new Message({
+        from: sender_tfid,
+        to: receiver_tfid,
+        text: message,
+        time: new Date().toISOString(),
+        read: true
+      });
+      await cmdMsg.save();
+
+      let replyText = "";
+      if (checkMatch) {
+        const targetId = checkMatch[1].trim();
+        const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
+        if (targetUserObj) {
+          const histMsgs = await Message.find({
+            $or: [{ from: targetUserObj.tfid }, { to: targetUserObj.tfid }]
+          }).sort({ time: -1 }).limit(1000);
+          histMsgs.reverse();
+          let combinedText = histMsgs.map(m => `[${m.time}] From ${m.from} To ${m.to}: ${m.text}`).join('\n');
+          if (combinedText.length > 15000) {
+            combinedText = combinedText.substring(0, 15000) + '... (truncated)';
+          }
+          replyText = `[ADMIN CHECK RESULT FOR ${targetUserObj.tfid}]:\n${combinedText || 'No messages found.'}`;
+        } else {
+          replyText = `[ADMIN CHECK ERROR]: User ${targetId} not found.`;
+        }
+      } else if (spamMatch) {
+        const targetId = spamMatch[1].trim();
+        const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
+        if (targetUserObj) {
+          const unblockDate = new Date();
+          unblockDate.setHours(unblockDate.getHours() + 24);
+          const newSpamCount = (targetUserObj.spamCount || 0) + 1;
+          
+          if (newSpamCount >= 3) {
+            await User.updateOne(
+              { tfid: targetUserObj.tfid }, 
+              { $set: { banned: true, bannedAt: new Date(), spamCount: newSpamCount, lastSpammedAt: new Date() } }
+            );
+            const banMsg = new Message({
+              from: 'TF-7777777',
+              to: targetUserObj.tfid,
+              text: `[{[Type BAN: ${targetUserObj.tfid}]}]`,
+              time: new Date().toISOString(),
+              read: false
+            });
+            await banMsg.save();
+            replyText = `[ADMIN SPAM ALERT]: User ${targetUserObj.tfid} has been restricted for SPAM 3 times. Automatically BANNED permanently.`;
+          } else {
+            await User.updateOne(
+              { tfid: targetUserObj.tfid }, 
+              { $set: { spammedUntil: unblockDate, spamCount: newSpamCount, lastSpammedAt: new Date() } }
+            );
+            const spamMsg = new Message({
+              from: 'TF-7777777',
+              to: targetUserObj.tfid,
+              text: `[{[Type SPAM: ${targetUserObj.tfid}]}]`,
+              time: new Date().toISOString(),
+              read: false
+            });
+            await spamMsg.save();
+            replyText = `[ADMIN SPAM SUCCESS]: User ${targetUserObj.tfid} restricted for 24h. Total spam count: ${newSpamCount}/3.`;
+          }
+        } else {
+          replyText = `[ADMIN SPAM ERROR]: User ${targetId} not found.`;
+        }
+      } else if (banMatch) {
+        const targetId = banMatch[1].trim();
+        const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
+        if (targetUserObj) {
+          await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: true, bannedAt: new Date() } });
+          const banMsg = new Message({
+            from: 'TF-7777777',
+            to: targetUserObj.tfid,
+            text: `[{[Type BAN: ${targetUserObj.tfid}]}]`,
+            time: new Date().toISOString(),
+            read: false
+          });
+          await banMsg.save();
+          replyText = `[ADMIN BAN SUCCESS]: User ${targetUserObj.tfid} has been permanently banned.`;
+        } else {
+          replyText = `[ADMIN BAN ERROR]: User ${targetId} not found.`;
+        }
+      } else if (unspamMatch) {
+        const targetId = unspamMatch[1].trim();
+        const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
+        if (targetUserObj) {
+          await User.updateOne(
+            { tfid: targetUserObj.tfid }, 
+            { $set: { spammedUntil: null, spamCount: 0, lastSpammedAt: null } }
+          );
+          replyText = `[ADMIN UNSPAM SUCCESS]: User ${targetUserObj.tfid} spam restriction has been cleared. Spam count reset to 0.`;
+        } else {
+          replyText = `[ADMIN UNSPAM ERROR]: User ${targetId} not found.`;
+        }
+      } else if (unbanMatch) {
+        const targetId = unbanMatch[1].trim();
+        const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
+        if (targetUserObj) {
+          await User.updateOne(
+            { tfid: targetUserObj.tfid }, 
+            { $set: { banned: false, bannedAt: null, spamCount: 0, lastSpammedAt: null } }
+          );
+          replyText = `[ADMIN UNBAN SUCCESS]: User ${targetUserObj.tfid} has been unbanned. Spam count reset to 0.`;
+        } else {
+          replyText = `[ADMIN UNBAN ERROR]: User ${targetId} not found.`;
+        }
+      }
+
+      const replyMsg = new Message({
+        from: 'TF-7777777',
+        to: receiver_tfid,
+        text: replyText,
+        time: new Date(Date.now() + 10).toISOString(),
+        read: false
+      });
+      await replyMsg.save();
+
+      return res.json({ success: true });
+    }
+  }
+
   const senderUserObj = await User.findOne({ tfid: sender_tfid });
   if (senderUserObj && senderUserObj.banned) {
     if (receiver_tfid !== 'TF-4352071' && receiver_tfid !== 'assistant@dh7.tf') {
@@ -678,7 +810,7 @@ app.post('/send', async (req, res) => {
       await Message.updateMany(
         {
           $or: [
-            { from: sender_tfid, to: receiver_tfid },
+            { sender_tfid, to: receiver_tfid },
             { from: receiver_tfid, to: sender_tfid }
           ]
         },
@@ -734,31 +866,90 @@ app.post('/send', async (req, res) => {
   }
 
   if (receiver_tfid === 'tfsdh7@dh7.tf' || receiver_tfid === 'TF-7777777') {
-    await Message.deleteMany({
-      $or: [
-        { from: sender_tfid, to: receiverExists.tfid },
-        { from: receiverExists.tfid, to: sender_tfid }
-      ],
-      text: { $ne: 'Reply no' }
-    });
+    if (sender_tfid === 'TF-7777777') {
+      const selfMsg = new Message({
+        from: sender_tfid,
+        to: receiver_tfid,
+        text: message,
+        time: new Date().toISOString(),
+        read: true
+      });
+      await selfMsg.save();
 
-    const replyExists = await Message.findOne({
-      from: receiverExists.tfid,
-      to: sender_tfid,
-      text: 'Reply no'
-    });
+      res.json({ success: true });
 
-    if (!replyExists) {
-      const dh7Reply = new Message({
+      (async () => {
+        try {
+          const selfMsgs = await Message.find({
+            from: 'TF-7777777',
+            to: 'TF-7777777'
+          }).sort({ time: -1 }).limit(10);
+          selfMsgs.reverse();
+
+          let promptMsgs = [
+            { role: 'system', content: "You are the D'H7 System Core Host Assistant. You are replying to the admin/host (TF-7777777) in a self-conversation. Speak naturally, be helpful, and support them as their automated system mirror." }
+          ];
+          selfMsgs.forEach(m => {
+            promptMsgs.push({
+              role: m.from === 'TF-7777777' && m.read === true ? 'user' : 'assistant',
+              content: m.text
+            });
+          });
+
+          const aiRes = await axios.post(
+            `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/@cf/meta/llama-3-8b-instruct`,
+            { messages: promptMsgs },
+            { headers: { 'Authorization': `Bearer ${process.env.CF_AI_TOKEN}` } }
+          );
+
+          const replyText = aiRes.data.result.response.trim();
+          const systemSelfReply = new Message({
+            from: 'TF-7777777',
+            to: 'TF-7777777',
+            text: replyText,
+            time: new Date(Date.now() + 10).toISOString(),
+            read: false
+          });
+          await systemSelfReply.save();
+        } catch (err) {
+          const errReply = new Message({
+            from: 'TF-7777777',
+            to: 'TF-7777777',
+            text: "D'H7 Self-System: Connection to core engine interrupted.",
+            time: new Date(Date.now() + 10).toISOString(),
+            read: false
+          });
+          await errReply.save();
+        }
+      })();
+      return;
+    } else {
+      await Message.deleteMany({
+        $or: [
+          { from: sender_tfid, to: receiverExists.tfid },
+          { from: receiverExists.tfid, to: sender_tfid }
+        ],
+        text: { $ne: 'Reply no' }
+      });
+
+      const replyExists = await Message.findOne({
         from: receiverExists.tfid,
         to: sender_tfid,
-        text: 'Reply no',
-        time: new Date().toISOString(),
-        read: false
+        text: 'Reply no'
       });
-      await dh7Reply.save();
+
+      if (!replyExists) {
+        const dh7Reply = new Message({
+          from: receiverExists.tfid,
+          to: sender_tfid,
+          text: 'Reply no',
+          time: new Date().toISOString(),
+          read: false
+        });
+        await dh7Reply.save();
+      }
+      return res.json({ success: true });
     }
-    return res.json({ success: true });
   }
 
   if (receiver_tfid === 'assistant@dh7.tf' || receiver_tfid === 'TF-4352071') {
@@ -824,7 +1015,9 @@ Available Commands (Must be strictly formatted on their own line as "[Type COMMA
 - [Type SEARCH: Moderation Rules]
 - [Type CHECK: TFID]
 - [Type SPAM: TFID]
-- [Type BAN: TFID]`;
+- [Type BAN: TFID]
+- [Type UNSPAM: TFID]
+- [Type UNBAN: TFID]`;
 
         let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
         
@@ -887,7 +1080,7 @@ Available Commands (Must be strictly formatted on their own line as "[Type COMMA
             if (targetUserObj) {
               const histMsgs = await Message.find({
                 $or: [{ from: targetUserObj.tfid }, { to: targetUserObj.tfid }]
-              }).sort({ time: -1 }).limit(30);
+              }).sort({ time: -1 }).limit(1000);
               let combinedText = histMsgs.map(m => `[${m.time}] From ${m.from} To ${m.to}: ${m.text}`).join('\n');
               if (combinedText.length > 15000) combinedText = combinedText.substring(0, 15000) + '...';
               
@@ -949,21 +1142,65 @@ Available Commands (Must be strictly formatted on their own line as "[Type COMMA
               } else {
                 const unblockDate = new Date();
                 unblockDate.setHours(unblockDate.getHours() + 24);
-                await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { spammedUntil: unblockDate } });
-                const spamMsg = new Message({
-                  from: 'TF-7777777',
-                  to: targetUserObj.tfid,
-                  text: `[{[Type SPAM: ${targetUserObj.tfid}]}]`,
-                  time: new Date().toISOString(),
-                  read: false
-                });
-                await spamMsg.save();
+                const newSpamCount = (targetUserObj.spamCount || 0) + 1;
                 
-                await logToAdmin('SPAM_SUCCESS', `TFID: ${targetUserObj.tfid} has been restricted for spam (24h)`);
-                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been restricted for SPAM (24 hours). State clearly to the user.` });
+                if (newSpamCount >= 3) {
+                  await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: true, bannedAt: new Date(), spamCount: newSpamCount, lastSpammedAt: new Date() } });
+                  const banMsg = new Message({
+                    from: 'TF-7777777',
+                    to: targetUserObj.tfid,
+                    text: `[{[Type BAN: ${targetUserObj.tfid}]}]`,
+                    time: new Date().toISOString(),
+                    read: false
+                  });
+                  await banMsg.save();
+                  await logToAdmin('BAN_SUCCESS_SPAM_LIMIT', `TFID: ${targetUserObj.tfid} automatically banned due to spam limit (3)`);
+                  aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been automatically BANNED permanently because they reached the maximum limit of 3 spam blocks.` });
+                } else {
+                  await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { spammedUntil: unblockDate, spamCount: newSpamCount, lastSpammedAt: new Date() } });
+                  const spamMsg = new Message({
+                    from: 'TF-7777777',
+                    to: targetUserObj.tfid,
+                    text: `[{[Type SPAM: ${targetUserObj.tfid}]}]`,
+                    time: new Date().toISOString(),
+                    read: false
+                  });
+                  await spamMsg.save();
+                  
+                  await logToAdmin('SPAM_SUCCESS', `TFID: ${targetUserObj.tfid} has been restricted for spam (24h)`);
+                  aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been restricted for SPAM (24 hours). Spam count is now ${newSpamCount}/3. State clearly to the user.` });
+                }
               }
             } else {
               await logToAdmin('SPAM_FAILED', `User TFID: ${targetId} not found`);
+              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
+            }
+          } else if (responseText.match(/\[Type UNSPAM:\s*([^\]]+)\]/i)) {
+            currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
+            const match = responseText.match(/\[Type UNSPAM:\s*([^\]]+)\]/i);
+            const targetId = match[1].trim();
+            aiPromptMessages.push({ role: 'assistant', content: `[Type UNSPAM: ${targetId}]` });
+            await logToAdmin('UNSPAM_REQUEST', `Unspam block request for TFID: ${targetId} initiated by ${sender_tfid}`);
+
+            const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
+            if (targetUserObj) {
+              await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { spammedUntil: null, spamCount: 0, lastSpammedAt: null } });
+              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been successfully unspammed.` });
+            } else {
+              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
+            }
+          } else if (responseText.match(/\[Type UNBAN:\s*([^\]]+)\]/i)) {
+            currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
+            const match = responseText.match(/\[Type UNBAN:\s*([^\]]+)\]/i);
+            const targetId = match[1].trim();
+            aiPromptMessages.push({ role: 'assistant', content: `[Type UNBAN: ${targetId}]` });
+            await logToAdmin('UNBAN_REQUEST', `Unban block request for TFID: ${targetId} initiated by ${sender_tfid}`);
+
+            const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
+            if (targetUserObj) {
+              await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: false, bannedAt: null, spamCount: 0, lastSpammedAt: null } });
+              aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been successfully unbanned.` });
+            } else {
               aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
             }
           } else {
