@@ -53,6 +53,7 @@ const userSchema = new mongoose.Schema({
   password: { type: String, default: '' },
   logo: { type: String, default: '' },
   banned: { type: Boolean, default: false },
+  bannedAt: { type: Date, default: null },
   spammedUntil: { type: Date, default: null }
 });
 const User = mongoose.model('User', userSchema);
@@ -100,6 +101,22 @@ function sanitizeUser(u) {
     if (!isNaN(birthYear)) {
       rest.age = (new Date().getFullYear() - birthYear).toString();
     }
+  }
+
+  if (rest.spammedUntil) {
+    const now = new Date();
+    const spammedUntilDate = new Date(rest.spammedUntil);
+    if (spammedUntilDate > now) {
+      const diffMs = spammedUntilDate.getTime() - now.getTime();
+      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+      rest.spamRemaining = { hours, minutes, seconds, formatted: `${hours}h ${minutes}m ${seconds}s` };
+    } else {
+      rest.spamRemaining = null;
+    }
+  } else {
+    rest.spamRemaining = null;
   }
   
   return rest;
@@ -178,6 +195,8 @@ async function cleanupOldMessages() {
       from: { $ne: 'TF-7656930' },
       to: { $ne: 'TF-7656930' }
     });
+    const fortyThreeDaysAgo = new Date(Date.now() - 43 * 24 * 60 * 60 * 1000);
+    await User.deleteMany({ banned: true, bannedAt: { $lt: fortyThreeDaysAgo } });
   } catch (e) {}
 }
 
@@ -373,10 +392,19 @@ app.post('/login', async (req, res) => {
   });
   if (user) {
     if (user.banned) {
-      return res.json({ success: false, error: `[{(Ban ${user.tfid})}]` });
+      return res.json({ success: false, error: `[{[Type BAN: ${user.tfid}]}]` });
     }
     if (user.spammedUntil && new Date() < user.spammedUntil) {
-      return res.json({ success: false, error: `Your account is temporarily restricted for spam. Ends on: ${user.spammedUntil.toISOString()}` });
+      const now = new Date();
+      const diffMs = user.spammedUntil.getTime() - now.getTime();
+      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+      return res.json({ 
+        success: false, 
+        error: `[{[Type SPAM: ${user.tfid}]}]`,
+        spamRemaining: { hours, minutes, seconds, formatted: `${hours}h ${minutes}m ${seconds}s` }
+      });
     }
     return res.json({ success: true, user: sanitizeUser(user) });
   }
@@ -883,8 +911,15 @@ Available Commands (Must be strictly formatted on their own line as "[Type COMMA
                 await logToAdmin('BAN_DUPLICATE', `TFID: ${targetUserObj.tfid} is already permanently banned`);
                 aiPromptMessages.push({ role: 'system', content: `INTERNAL SYSTEM ALERT: User ${targetId} is already permanently banned. Let the user know naturally.` });
               } else {
-                await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: true } });
-                await generateAiNotification(targetUserObj.tfid, "Your account has been permanently banned from D'H7 for violating community guidelines and safety rules.");
+                await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: true, bannedAt: new Date() } });
+                const banMsg = new Message({
+                  from: 'TF-7777777',
+                  to: targetUserObj.tfid,
+                  text: `[{[Type BAN: ${targetUserObj.tfid}]}]`,
+                  time: new Date().toISOString(),
+                  read: false
+                });
+                await banMsg.save();
                 await logToAdmin('BAN_SUCCESS', `TFID: ${targetUserObj.tfid} has been permanently banned`);
                 aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been BANNED successfully. State clearly to the user that they have been permanently banned.` });
               }
@@ -915,7 +950,14 @@ Available Commands (Must be strictly formatted on their own line as "[Type COMMA
                 const unblockDate = new Date();
                 unblockDate.setHours(unblockDate.getHours() + 24);
                 await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { spammedUntil: unblockDate } });
-                await generateAiNotification(targetUserObj.tfid, `Your account has been restricted for 24 hours due to spamming or inappropriate activities. The restriction ends on: ${unblockDate.toISOString()}`);
+                const spamMsg = new Message({
+                  from: 'TF-7777777',
+                  to: targetUserObj.tfid,
+                  text: `[{[Type SPAM: ${targetUserObj.tfid}]}]`,
+                  time: new Date().toISOString(),
+                  read: false
+                });
+                await spamMsg.save();
                 
                 await logToAdmin('SPAM_SUCCESS', `TFID: ${targetUserObj.tfid} has been restricted for spam (24h)`);
                 aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been restricted for SPAM (24 hours). State clearly to the user.` });
