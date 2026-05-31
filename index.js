@@ -622,13 +622,13 @@ app.post('/upload-profile', upload.single('image'), async (req, res) => {
 
     const command = new PutObjectCommand({
       Bucket: process.env.R2_BUCKET,
-      Key: tfid,
+      Key: `${tfid}-${Date.now()}`,
       Body: file.buffer,
       ContentType: file.mimetype
     });
     await s3Client.send(command);
     
-    const logoUrl = `https://pub-24986ee77a4440dba7c072922c670547.r2.dev/${tfid}`;
+    const logoUrl = `https://pub-24986ee77a4440dba7c072922c670547.r2.dev/${tfid}-${Date.now()}`;
     await User.updateOne({ tfid: tfid }, { $set: { logo: logoUrl } });
     
     res.json({ success: true, logo: logoUrl });
