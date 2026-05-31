@@ -5,7 +5,7 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const axios = require('axios');
 const multer = require('multer');
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -621,19 +621,7 @@ app.post('/upload-profile', upload.single('image'), async (req, res) => {
     if (!tfid || !file) return res.json({ success: false, error: 'Missing file or TFID' });
 
     const user = await User.findOne({ tfid: tfid });
-    if (user && user.logo) {
-      try {
-        const urlParts = user.logo.split('/');
-        const lastPart = urlParts[urlParts.length - 1];
-        if (lastPart && lastPart.startsWith(tfid)) {
-          const deleteCommand = new DeleteObjectCommand({
-            Bucket: process.env.R2_BUCKET,
-            Key: lastPart
-          });
-          await s3Client.send(deleteCommand);
-        }
-      } catch (deleteError) {}
-    }
+    if (!user) return res.json({ success: false, error: 'User not found' });
 
     const uniqueTimestamp = Date.now();
     const dynamicKey = `${tfid}-${uniqueTimestamp}`;
@@ -645,11 +633,34 @@ app.post('/upload-profile', upload.single('image'), async (req, res) => {
       ContentType: file.mimetype
     });
     await s3Client.send(command);
-    
-    const logoUrl = `https://pub-24986ee77a4440dba7c072922c670547.r2.dev/${dynamicKey}`;
-    await User.updateOne({ tfid: tfid }, { $set: { logo: logoUrl } });
-    
-    res.json({ success: true, logo: logoUrl });
+
+    const headCommand = new HeadObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: dynamicKey
+    });
+    const headResult = await s3Client.send(headCommand);
+
+    if (headResult && headResult.$metadata && headResult.$metadata.httpStatusCode === 200) {
+      if (user.logo) {
+        try {
+          const urlParts = user.logo.split('/');
+          const lastPart = urlParts[urlParts.length - 1];
+          if (lastPart && lastPart.startsWith(tfid)) {
+            const deleteCommand = new DeleteObjectCommand({
+              Bucket: process.env.R2_BUCKET,
+              Key: lastPart
+            });
+            await s3Client.send(deleteCommand);
+          }
+        } catch (deleteError) {}
+      }
+
+      const logoUrl = `https://pub-24986ee77a4440dba7c072922c670547.r2.dev/${dynamicKey}`;
+      await User.updateOne({ tfid: tfid }, { $set: { logo: logoUrl } });
+      res.json({ success: true, logo: logoUrl });
+    } else {
+      res.json({ success: false, error: 'Upload verification failed' });
+    }
   } catch (e) {
     res.json({ success: false, error: 'Upload failed' });
   }
