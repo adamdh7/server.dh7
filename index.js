@@ -399,42 +399,95 @@ async function verifyCaller(req, res, next) {
   }
 }
 
-async function notifyPunishment(targetTfid, type) {
+async function generateLocalizedBanOrSpamMessage(targetTfid, actionType, extraDetails = '') {
   try {
-    const lastMsgs = await Message.find({
+    const recentMsgs = await Message.find({
       $or: [{ from: targetTfid }, { to: targetTfid }]
     }).sort({ time: -1 }).limit(7);
+
+    recentMsgs.reverse();
     
-    let contextRaw = lastMsgs.map(m => m.text).join('\n');
-    if (contextRaw.length > 7000) {
-      contextRaw = contextRaw.substring(0, 7000);
+    let combinedContext = recentMsgs.map(m => `[From ${m.from} to ${m.to}]: ${m.text}`).join('\n');
+    if (combinedContext.length > 7000) {
+      combinedContext = combinedContext.substring(0, 7000);
     }
+
+    const systemPrompt = "You are the D'H7 System Core Notification Translator. Your task is to generate a natural, official, clear and direct system notification message to the target user informing them about their system status update. Read their chat logs context to detect their preferred language, and generate the notification strictly in that language. Do not output any conversational introductions, system markups, notes, or quotes. Output ONLY the translated final message.";
     
-    let systemP = "Tu es l'administrateur système officiel de D'H7. Rédige un message strict et clair pour informer l'utilisateur de sa sanction. Base-toi sur ses messages récents fournis pour justifier la sanction et détecter sa langue principale. Ne mets pas de guillemets, fournis uniquement le texte final.";
-    let baseMsg = "";
-    
-    if (type === 'BAN') {
-      baseMsg = "L'utilisateur est banni définitivement de la plateforme. Formule le message en disant qu'il est banni définitivement suite à ces messages qui enfreignent nos règles : " + contextRaw;
-    } else {
-      baseMsg = "L'utilisateur est restreint pour 24 heures. Formule le message en disant qu'il ne peut plus envoyer de messages pendant 24h suite à ces messages qui sont considérés comme du spam ou un abus : " + contextRaw;
+    let template = "";
+    if (actionType === 'BAN') {
+      template = `Dear User, Your account (${targetTfid}) has been permanently banned from the D'H7 platform due to safety violations. Reason/Investigation details: ${extraDetails || 'Abuse detected'}.`;
+    } else if (actionType === 'SPAM') {
+      template = `Dear User, Your account (${targetTfid}) has been restricted from sending messages for 24 hours. Spam details: ${extraDetails}. Please respect other members.`;
     }
-    
-    const aiRes = await executeAiRequest([
-      { role: 'system', content: systemP },
-      { role: 'user', content: baseMsg }
+
+    const userPrompt = `Target User Chat History Language Context:\n${combinedContext || 'No past messages'}\n\nNotification Template:\n${template}`;
+
+    const response = await executeAiRequest([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
     ], '@cf/meta/llama-3.1-8b-instruct');
+
+    const resultText = response.data.result.response.trim();
     
-    const finalMsgText = aiRes.data.result.response.trim();
-    
-    const sysMsg = new Message({
+    const finalNotification = new Message({
       from: 'TF-7777777',
       to: targetTfid,
-      text: finalMsgText,
+      text: resultText || template,
       time: new Date().toISOString(),
       read: false
     });
-    await sysMsg.save();
-  } catch (e) {}
+    await finalNotification.save();
+  } catch (err) {
+    try {
+      const fallbackMsg = new Message({
+        from: 'TF-7777777',
+        to: targetTfid,
+        text: actionType === 'BAN' ? `Account ${targetTfid} Banned.` : `Account ${targetTfid} restricted for 24h.`,
+        time: new Date().toISOString(),
+        read: false
+      });
+      await fallbackMsg.save();
+    } catch (e) {}
+  }
+}
+
+async function generateAiNotification(targetTfid, englishTemplate) {
+  try {
+    const lastMsgs = await Message.find({
+      $or: [{ from: targetTfid }, { to: targetTfid }]
+    }).sort({ time: -1 }).limit(10);
+    
+    const userLanguageContext = lastMsgs.map(m => m.text).join('\n');
+    const systemPrompt = "You are an automated translation assistant for D'H7 platform. Your job is to translate and rephrase the given official notification template into the target user's language based on their language context. Make sure to keep the tone informative, official, and clear. Output ONLY the final translated message without any system notes, conversational intros, or quotes.";
+    const userPrompt = `Target User Messages Context:\n${userLanguageContext}\n\nNotification Template:\n${englishTemplate}`;
+    
+    const response = await executeAiRequest([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ], '@cf/meta/llama-3.1-8b-instruct');
+    
+    const translatedText = response.data.result.response.trim();
+    const systemMessage = new Message({
+      from: 'TF-7777777',
+      to: targetTfid,
+      text: translatedText || englishTemplate,
+      time: new Date().toISOString(),
+      read: false
+    });
+    await systemMessage.save();
+  } catch (error) {
+    try {
+      const fallbackMessage = new Message({
+        from: 'TF-7777777',
+        to: targetTfid,
+        text: englishTemplate,
+        time: new Date().toISOString(),
+        read: false
+      });
+      await fallbackMessage.save();
+    } catch (e) {}
+  }
 }
 
 async function logToAdmin(action, details) {
@@ -834,7 +887,7 @@ app.post('/send', async (req, res) => {
                 read: false
               });
               await banMsg.save();
-              await notifyPunishment(targetUserObj.tfid, 'BAN');
+              await generateLocalizedBanOrSpamMessage(targetUserObj.tfid, 'BAN', 'Spammed 3 times limit exceeded');
               replyText = `[ADMIN SPAM ALERT]: User ${targetUserObj.tfid} has been restricted for SPAM 3 times. Automatically BANNED permanently.`;
             } else {
               await User.updateOne(
@@ -849,7 +902,7 @@ app.post('/send', async (req, res) => {
                 read: false
               });
               await spamMsg.save();
-              await notifyPunishment(targetUserObj.tfid, 'SPAM');
+              await generateLocalizedBanOrSpamMessage(targetUserObj.tfid, 'SPAM', `Spam block #${newSpamCount}`);
               replyText = `[ADMIN SPAM SUCCESS]: User ${targetUserObj.tfid} restricted for 24h. Total spam count: ${newSpamCount}/3.`;
             }
           } else {
@@ -868,7 +921,7 @@ app.post('/send', async (req, res) => {
               read: false
             });
             await banMsg.save();
-            await notifyPunishment(targetUserObj.tfid, 'BAN');
+            await generateLocalizedBanOrSpamMessage(targetUserObj.tfid, 'BAN', 'Manual admin ban execution');
             replyText = `[ADMIN BAN SUCCESS]: User ${targetUserObj.tfid} has been permanently banned.`;
           } else {
             replyText = `[ADMIN BAN ERROR]: User ${targetId} not found.`;
@@ -1181,13 +1234,19 @@ app.post('/send', async (req, res) => {
             }
           }
 
-          const systemInstructions = `[ROLE]: Assistant D'H7. User: ${userInfo}.
-[RULES]:
-1. Tu es une aide conversationnelle. Parle naturellement.
-2. N'invente JAMAIS de commandes comme [Type DELETE: TFID] ou [Type SEARCH: message]. Ces commandes n'existent pas. Si on te demande comment supprimer, explique-le avec du texte normal.
-3. Les SEULES commandes valides sont : [Type SEARCH: About D'H7], [Type SEARCH: Moderation Rules], [Type CHECK: TFID], [Type SPAM: TFID], [Type BAN: TFID], [Type UNSPAM: TFID], [Type UNBAN: TFID].
-4. Pour exécuter une commande valide, écris-la seule sur une ligne sans aucun autre texte.
-5. Fais toujours [Type CHECK: TFID] avant de bannir ou bloquer.`;
+          const systemInstructions =`[ROLE]: Assistant D'H7. User: ${userInfo}.
+[RULE 1]: To execute an action, output ONLY the raw command on a single line. No conversational intro, no markdown, no quote.
+[RULE 2]: Never simulate actions. These commands are private admin instructions to the server. Users do not see them.
+[RULE 3]: If a user asks to spam/ban someone, ALWAYS check logs first using [Type CHECK: TFID].
+
+[COMMANDS]:
+- [Type SEARCH: About D'H7]
+- [Type SEARCH: Moderation Rules]
+- [Type CHECK: TFID]
+- [Type SPAM: TFID]
+- [Type BAN: TFID]
+- [Type UNSPAM: TFID]
+- [Type UNBAN: TFID]`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
           
@@ -1203,7 +1262,7 @@ app.post('/send', async (req, res) => {
           let currentAiModel = '@cf/meta/llama-3.1-8b-instruct';
           let finalResponseText = "Could not finalize processing at this moment. Please retry.";
 
-          while (aiLoopActive && aiLoopCount < 4) {
+          while (aiLoopActive && aiLoopCount < 6) {
             aiLoopCount++;
             let aiRes;
             
@@ -1224,41 +1283,56 @@ app.post('/send', async (req, res) => {
               await logToAdmin('SEARCH', `About D'H7 requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
-              aiPromptMessages.push({ role: 'system', content: `DATA D'H7: URL: dh7.adamdh7.org. Signup: Name, DOB, unique DH7 addr, one-time Password (NO RECOVERY). Login: DH7 or TFID + password. Profile Edit: menu. Reply: Swipe left. Delete: Tap. Search: Find friends by name, TFID, DH7 addr. (Explique naturellement, n'utilise pas de commandes).` });
+              aiPromptMessages.push({ role: 'system', content: `### INTERNAL D'H7 SYSTEM DATA
+- Sign Up: On the Login screen, click "Create an account" at the bottom. Enter Last/First Name, DoB, unique DH7 address and Password.
+- IMPORTANT: Passwords cannot be retrieved or modified once set.
+- Login: Use DH7 address (e.g. user@dh7.tf) or TFID (e.g. TF-XXXXXXX) and password.
+- Customization: Press "•••" in header. Tap the circular avatar to change profile logo.
+- Actions: Swipe left on a message bubble to reply. Tap a message to access delete.
+- File/Image sending is done via the '+' button.` });
             } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
               await logToAdmin('SEARCH', `Moderation Rules requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
-              aiPromptMessages.push({ role: 'system', content: `MODERATION PROTOCOL: 1. ALWAYS output exactly [Type CHECK: TFID] to see history first. 2. If spamming, output exactly [Type SPAM: TFID]. 3. If severe abuse, output exactly [Type BAN: TFID]. NEVER mix text and commands.` });
+              aiPromptMessages.push({ role: 'system', content: `### MODERATION RULES
+1. Do not simulate actions. Output commands exactly as listed: [Type CHECK: TFID], [Type SPAM: TFID], [Type BAN: TFID], [Type UNSPAM: TFID], [Type UNBAN: TFID].
+2. Always execute [Type CHECK: TFID] before applying SPAM or BAN.
+3. Once logs are reviewed, either decline or apply the sanction using the exact command line.` });
             } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
               const targetId = match[1].trim();
               aiPromptMessages.push({ role: 'assistant', content: `[Type CHECK: ${targetId}]` });
-              await logToAdmin('CHECK_INITIATED', `Checking messages for TFID: ${targetId}`);
+              
+              await logToAdmin('CHECK_INITIATED', `Checking messages for TFID: ${targetId} requested by ${sender_tfid}`);
+
               const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
               if (targetUserObj) {
                 const histMsgs = await Message.find({
                   $or: [{ from: targetUserObj.tfid }, { to: targetUserObj.tfid }]
-                }).sort({ time: -1 }).limit(100);
+                }).sort({ time: -1 }).limit(1000);
                 let combinedText = histMsgs.map(m => `[${m.time}] From ${m.from} To ${m.to}: ${m.text}`).join('\n');
-                if (combinedText.length > 5000) combinedText = combinedText.substring(0, 5000) + '...';
-                await logToAdmin('CHECK_RESULT', `Retrieved msgs for TFID: ${targetUserObj.tfid}`);
-                aiPromptMessages.push({ role: 'system', content: `DATA CHECK ${targetId}:\n${combinedText || 'No msgs found.'}\nAnalyze carefully. Act if rules broken.` });
+                if (combinedText.length > 15000) combinedText = combinedText.substring(0, 15000) + '...';
+                
+                await logToAdmin('CHECK_RESULT', `Retrieved ${histMsgs.length} messages for TFID: ${targetUserObj.tfid}`);
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA (Messages for ${targetId}):\n${combinedText || 'No messages found.'}\n\nReview this history. If harmful, output [Type SPAM: ${targetId}] or [Type BAN: ${targetId}].` });
               } else {
                 await logToAdmin('CHECK_FAILED', `User TFID: ${targetId} not found`);
-                aiPromptMessages.push({ role: 'system', content: `DATA: User ${targetId} not found.` });
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
               }
             } else if (responseText.match(/\[Type BAN:\s*([^\]]+)\]/i)) {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               const match = responseText.match(/\[Type BAN:\s*([^\]]+)\]/i);
               const targetId = match[1].trim();
               aiPromptMessages.push({ role: 'assistant', content: `[Type BAN: ${targetId}]` });
-              await logToAdmin('BAN_REQUEST', `Ban execution request for TFID: ${targetId}`);
+              
+              await logToAdmin('BAN_REQUEST', `Ban execution request for TFID: ${targetId} initiated by ${sender_tfid}`);
+
               const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
               if (targetUserObj) {
                 if (targetUserObj.banned) {
-                  aiPromptMessages.push({ role: 'system', content: `User ${targetId} already banned.` });
+                  await logToAdmin('BAN_DUPLICATE', `TFID: ${targetUserObj.tfid} is already permanently banned`);
+                  aiPromptMessages.push({ role: 'system', content: `INTERNAL SYSTEM ALERT: User ${targetId} is already permanently banned. Let the user know naturally.` });
                 } else {
                   await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: true, bannedAt: new Date() } });
                   const banMsg = new Message({
@@ -1269,28 +1343,38 @@ app.post('/send', async (req, res) => {
                     read: false
                   });
                   await banMsg.save();
-                  await notifyPunishment(targetUserObj.tfid, 'BAN');
-                  await logToAdmin('BAN_SUCCESS', `TFID: ${targetUserObj.tfid} banned`);
-                  aiPromptMessages.push({ role: 'system', content: `User ${targetId} BANNED successfully. State it to the user.` });
+                  await generateLocalizedBanOrSpamMessage(targetUserObj.tfid, 'BAN', `Banned by AI moderation request`);
+                  await logToAdmin('BAN_SUCCESS', `TFID: ${targetUserObj.tfid} has been permanently banned`);
+                  aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been BANNED successfully.` });
                 }
               } else {
-                aiPromptMessages.push({ role: 'system', content: `User ${targetId} not found.` });
+                await logToAdmin('BAN_FAILED', `User TFID: ${targetId} not found`);
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
               }
             } else if (responseText.match(/\[Type SPAM:\s*([^\]]+)\]/i)) {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               const match = responseText.match(/\[Type SPAM:\s*([^\]]+)\]/i);
               const targetId = match[1].trim();
               aiPromptMessages.push({ role: 'assistant', content: `[Type SPAM: ${targetId}]` });
-              await logToAdmin('SPAM_REQUEST', `Spam request for TFID: ${targetId}`);
+              
+              await logToAdmin('SPAM_REQUEST', `Spam block request for TFID: ${targetId} initiated by ${sender_tfid}`);
+
               const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
               if (targetUserObj) {
                 const now = new Date();
                 if (targetUserObj.spammedUntil && now < targetUserObj.spammedUntil) {
-                  aiPromptMessages.push({ role: 'system', content: `User ${targetId} already restricted.` });
+                  const diffMs = targetUserObj.spammedUntil.getTime() - now.getTime();
+                  const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+                  const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                  const diffSecs = Math.floor((diffMs % (1000 * 60)) / 1000);
+                  
+                  await logToAdmin('SPAM_DUPLICATE', `TFID: ${targetUserObj.tfid} is already spammed. Remaining time: ${diffHrs}h ${diffMins}m ${diffSecs}s`);
+                  aiPromptMessages.push({ role: 'system', content: `INTERNAL SYSTEM ALERT: User ${targetId} is already restricted for spam.` });
                 } else {
                   const unblockDate = new Date();
                   unblockDate.setHours(unblockDate.getHours() + 24);
                   const newSpamCount = (targetUserObj.spamCount || 0) + 1;
+                  
                   if (newSpamCount >= 3) {
                     await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: true, bannedAt: new Date(), spamCount: newSpamCount, lastSpammedAt: new Date() } });
                     const banMsg = new Message({
@@ -1301,8 +1385,9 @@ app.post('/send', async (req, res) => {
                       read: false
                     });
                     await banMsg.save();
-                    await notifyPunishment(targetUserObj.tfid, 'BAN');
-                    aiPromptMessages.push({ role: 'system', content: `User ${targetId} automatically BANNED permanently due to reaching 3 spam limits.` });
+                    await generateLocalizedBanOrSpamMessage(targetUserObj.tfid, 'BAN', 'Spammed 3 times limit reached via AI restriction');
+                    await logToAdmin('BAN_SUCCESS_SPAM_LIMIT', `TFID: ${targetUserObj.tfid} automatically banned due to spam limit (3)`);
+                    aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been automatically BANNED permanently because they reached the maximum limit of 3 spam blocks.` });
                   } else {
                     await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { spammedUntil: unblockDate, spamCount: newSpamCount, lastSpammedAt: new Date() } });
                     const spamMsg = new Message({
@@ -1313,40 +1398,58 @@ app.post('/send', async (req, res) => {
                       read: false
                     });
                     await spamMsg.save();
-                    await notifyPunishment(targetUserObj.tfid, 'SPAM');
-                    aiPromptMessages.push({ role: 'system', content: `User ${targetId} restricted for SPAM (24h). State it.` });
+                    await generateLocalizedBanOrSpamMessage(targetUserObj.tfid, 'SPAM', `Spam violation restriction #${newSpamCount}`);
+                    
+                    await logToAdmin('SPAM_SUCCESS', `TFID: ${targetUserObj.tfid} has been restricted for spam (24h)`);
+                    aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been restricted for SPAM (24 hours).` });
                   }
                 }
               } else {
-                aiPromptMessages.push({ role: 'system', content: `User ${targetId} not found.` });
+                await logToAdmin('SPAM_FAILED', `User TFID: ${targetId} not found`);
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
               }
             } else if (responseText.match(/\[Type UNSPAM:\s*([^\]]+)\]/i)) {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               const match = responseText.match(/\[Type UNSPAM:\s*([^\]]+)\]/i);
               const targetId = match[1].trim();
               aiPromptMessages.push({ role: 'assistant', content: `[Type UNSPAM: ${targetId}]` });
+              await logToAdmin('UNSPAM_REQUEST', `Unspam block request for TFID: ${targetId} initiated by ${sender_tfid}`);
+
               const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
               if (targetUserObj) {
                 await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { spammedUntil: null } });
-                await Message.deleteMany({ from: 'TF-7777777', to: targetUserObj.tfid, text: `[{[Type SPAM: ${targetUserObj.tfid}]}]` });
-                aiPromptMessages.push({ role: 'system', content: `User ${targetId} unspammed.` });
+                await Message.deleteMany({
+                  from: 'TF-7777777',
+                  to: targetUserObj.tfid,
+                  text: `[{[Type SPAM: ${targetUserObj.tfid}]}]`
+                });
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been successfully unspammed.` });
               } else {
-                aiPromptMessages.push({ role: 'system', content: `User not found.` });
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
               }
             } else if (responseText.match(/\[Type UNBAN:\s*([^\]]+)\]/i)) {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               const match = responseText.match(/\[Type UNBAN:\s*([^\]]+)\]/i);
               const targetId = match[1].trim();
               aiPromptMessages.push({ role: 'assistant', content: `[Type UNBAN: ${targetId}]` });
+              await logToAdmin('UNBAN_REQUEST', `Unban block request for TFID: ${targetId} initiated by ${sender_tfid}`);
+
               const targetUserObj = await User.findOne({ $or: [{ tfid: targetId }, { dh7: targetId }] });
               if (targetUserObj) {
                 await User.updateOne({ tfid: targetUserObj.tfid }, { $set: { banned: false, bannedAt: null, spamCount: 0, lastSpammedAt: null, spammedUntil: null, logo: '' } });
-                await Message.deleteMany({ $or: [{ from: targetUserObj.tfid }, { to: targetUserObj.tfid }] });
-                aiPromptMessages.push({ role: 'system', content: `User ${targetId} unbanned.` });
+                await Message.deleteMany({
+                  $or: [{ from: targetUserObj.tfid }, { to: targetUserObj.tfid }]
+                });
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} has been successfully unbanned and reset.` });
               } else {
-                aiPromptMessages.push({ role: 'system', content: `User not found.` });
+                aiPromptMessages.push({ role: 'system', content: `INTERNAL DATA: User ${targetId} not found.` });
               }
             } else {
+              finalResponseText = responseText;
+              aiLoopActive = false;
+            }
+
+            if (aiLoopActive && aiLoopCount >= 5) {
               finalResponseText = responseText;
               aiLoopActive = false;
             }
