@@ -1179,7 +1179,7 @@ app.post('/send', async (req, res) => {
           }
 
           const systemInstructions =`[ROLE]: Assistant D'H7. User: ${userInfo}.
-[RULE 1]: To execute an action, output ONLY the raw command on a single line. No text around it, no markdown (\`), no quotes.
+[RULE 1]: To execute an action, output ONLY the raw command on a single line. No text around it, no markdown (\), no quotes.
 [RULE 2]: Never fake actions. Use the commands below. If a user asks to spam/ban someone, ALWAYS run [Type CHECK: TFID] first to investigate their history.
 [RULE 3]: Otherwise, be a friendly conversational helper.
 [LOG NOTE]: All commands are supervised.
@@ -1275,7 +1275,7 @@ app.post('/send', async (req, res) => {
 
 ### COMMAND SYNTAX RULES (CRITICAL)
 - Output the command on its OWN LINE with ZERO text before or after it.
-- NEVER wrap commands in markdown backticks (\`), bolding (**), or quotes ("").
+- NEVER wrap commands in markdown backticks (\), bolding (**), or quotes ("").
 - Only these exact text strings are valid:
   [Type CHECK: TFID]
   [Type SPAM: TFID]
@@ -1283,7 +1283,7 @@ app.post('/send', async (req, res) => {
   [Type BAN: TFID]
 
 ### REQUIRED WORKFLOW
-1. **Investigate First**: You MUST execute `[Type CHECK: TFID]` to view logs before punishing anyone. Never act blindly.
+1. **Investigate First**: You MUST execute "[Type CHECK: TFID]" to view logs before punishing anyone. Never act blindly.
 2. **Evaluate Logs**:
    - *Innocent*: Do nothing. Decline the report politely.
    - *Spam/Flooding*: Output ONLY: [Type SPAM: TFID] 
