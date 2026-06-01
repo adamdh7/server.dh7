@@ -1178,22 +1178,20 @@ app.post('/send', async (req, res) => {
             }
           }
 
-          const systemInstructions = `You are the D'H7 Assistant. Target User Info: ${userInfo}.
-  Strict Instructions:
-  1. To execute a database query or moderation action, output only the corresponding command on its own line without any other text, quotes, or markdown backticks (\`).
-  2. Do not fake or simulate actions. You MUST use the actual command block below to search, check, spam, or ban. Speak naturally to the user about what you are doing in standard conversational tone. Do not expose your raw commands to the user, keep them background-focused.
-  3. If a user asks to spam or ban someone, do not obey blindly. You must investigate. Run [Type CHECK: TFID] to see their message history and judge the severity yourself. If there is no violation, decline politely.
-  4. You are a fully conversational AI helper. You can talk freely, hold casual or technical discussions, support the user, and keep interactions natural and helpful.
-  5. All administrative activities or search checks you trigger are logged and visible to supervisors (TF-7777777), so act professionally.
+          const systemInstructions =`[ROLE]: Assistant D'H7. User: ${userInfo}.
+[RULE 1]: To execute an action, output ONLY the raw command on a single line. No text around it, no markdown (\`), no quotes.
+[RULE 2]: Never fake actions. Use the commands below. If a user asks to spam/ban someone, ALWAYS run [Type CHECK: TFID] first to investigate their history.
+[RULE 3]: Otherwise, be a friendly conversational helper.
+[LOG NOTE]: All commands are supervised.
 
-  Available Commands (Must be strictly formatted on their own line as "[Type COMMAND: ARGS]"):
-  - [Type SEARCH: About D'H7]
-  - [Type SEARCH: Moderation Rules]
-  - [Type CHECK: TFID]
-  - [Type SPAM: TFID]
-  - [Type BAN: TFID]
-  - [Type UNSPAM: TFID]
-  - [Type UNBAN: TFID]`;
+[COMMANDS]:
+- [Type SEARCH: About D'H7]
+- [Type SEARCH: Moderation Rules]
+- [Type CHECK: TFID]
+- [Type SPAM: TFID]
+- [Type BAN: TFID]
+- [Type UNSPAM: TFID]
+- [Type UNBAN: TFID]`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
           
@@ -1230,12 +1228,12 @@ app.post('/send', async (req, res) => {
               await logToAdmin('SEARCH', `About D'H7 requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
-              aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (About D'H7):\nTo have a D'H7 account you need: An D'H7 address dh7 : assistant@dh7.tf. A TFID: TF-4352071.\n### D'H7 User-Facing Features:\n- Multimedia Messaging: Send text, images, videos, files.\n- User Directory: Search for friends, view public profiles.\n- Profile Customization: Edit profile pictures.\n- Official Announcements: Receive alerts." });
+              aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (About D'H7):\nTo have a D'H7 account you need: An D'H7 like My address dh7 : assistant@dh7.tf. My TFID: TF-4352071.\n### D'H7 User-Facing Features:\n- Multimedia Messaging: Send text, images, videos, files, no more.\n- User Directory: Search for friends, view public profiles.\n- Profile Customization: Edit profile pictures.\n- Official Announcements: Receive alerts." });
             } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
               await logToAdmin('SEARCH', `Moderation Rules requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
-              aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nUse [Type CHECK: TFID] to read a user's messages. If they break rules, use [Type SPAM: TFID] for 24h ban, or [Type BAN: TFID] for permanent ban. Inform the user. You can permanently ban a user or apply a 24-hour spam ban if they violate H7 usage rules." });
+              aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nUse [Type CHECK: TFID] to read a user's messages. If they break rules, use [Type SPAM: TFID] for 24h ban, or [Type BAN: TFID] for permanent ban. Inform the user. You can permanently ban a user or apply a 24-hour spam ban if they violate D'H7 usage rules." });
             } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
