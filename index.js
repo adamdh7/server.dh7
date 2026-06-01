@@ -1249,12 +1249,12 @@ app.post('/send', async (req, res) => {
 ### Logging In
 - **URL**: https://dh7.adamdh7.org/
 - **Credentials Allowed**:
-  - **Option A**: DH7 Address (Include the suffix `@dh7.tf` if necessary, though the system can handle it).
-  - **Option B**: Full TFID (Must strictly include the "TF-" prefix, example: `TF-XXXXXXX`).
+  - **Option A**: DH7 Address (Include the suffix "@dh7.tf" if necessary, though the system can handle it).
+  - **Option B**: Full TFID (Must strictly include the "TF-" prefix, example: "TF-XXXXXXX").
 - **Steps**: Enter the DH7 Address or TFID, enter the Password in the field below, and click the "Log In" button.
 
 ### Profile Customization & Info
-- **Access Settings**: Click the three dots `•••` icon in the application header.
+- **Access Settings**: Click the three dots "•••" icon in the application header.
 - **Change Profile Picture**: Click on the circular logo/avatar icon inside the menu to upload a new photo.
 - **Limitations**: No other account information (Name, Username, DH7 address) can be edited or changed at this time.
 
