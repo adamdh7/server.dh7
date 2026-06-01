@@ -1228,12 +1228,68 @@ app.post('/send', async (req, res) => {
               await logToAdmin('SEARCH', `About D'H7 requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
-              aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (About D'H7):\nTo have a D'H7 account you need: An D'H7 like My address dh7 : assistant@dh7.tf. My TFID: TF-4352071.\n### D'H7 User-Facing Features:\n- Multimedia Messaging: Send text, images, videos, files, no more.\n- User Directory: Search for friends, view public profiles.\n- Profile Customization: Edit profile pictures.\n- Official Announcements: Receive alerts." });
+              aiPromptMessages.push({ role: 'system', content: `### INTERNAL DATA: ABOUT D'H7 SYSTEM & FEATURES
+
+### AI Assistant Information
+- **Your Role**: Assistant D'H7.
+- **Your DH7 Address**: assistant@dh7.tf
+- **Your TFID**: TF-4352071
+
+### Account Creation (Sign Up)
+- **URL**: https://dh7.adamdh7.org/
+- **Steps**: On the Login UI, click the "Create an account" button at the very bottom.
+- **Required Fields**: 
+  1. Last Name
+  2. First Name
+  3. Date of Birth
+  4. DH7 Address (Unique username, lowercase a-z, 0-9 only. Permanent and non-modifiable).
+  5. Password (Entered only once during registration).
+- **CRITICAL WARNING**: Passwords CANNOT be changed, modified, or recovered. If a user loses their password, the account is permanently lost. There is currently no recovery system.
+
+### Logging In
+- **URL**: https://dh7.adamdh7.org/
+- **Credentials Allowed**:
+  - **Option A**: DH7 Address (Include the suffix `@dh7.tf` if necessary, though the system can handle it).
+  - **Option B**: Full TFID (Must strictly include the "TF-" prefix, example: `TF-XXXXXXX`).
+- **Steps**: Enter the DH7 Address or TFID, enter the Password in the field below, and click the "Log In" button.
+
+### Profile Customization & Info
+- **Access Settings**: Click the three dots `•••` icon in the application header.
+- **Change Profile Picture**: Click on the circular logo/avatar icon inside the menu to upload a new photo.
+- **Limitations**: No other account information (Name, Username, DH7 address) can be edited or changed at this time.
+
+### Messaging Actions
+- **Reply to Messages**: Swipe LEFT on any message bubble to trigger the reply feature.
+- **Delete Messages**: Tap or use the message options context menu to delete a message (this removes it for the user).
+- **Copying Data**: Users can tap on a message or user profile fields to copy text, a TFID, or a DH7 address directly to their clipboard.
+**Supported message format**: Sending images, videos, and files is done via the "+" button, and text messages via the Input bar; other message formats are not supported.
+
+### User Search & Contacts
+- **Search Users**: Use the search input/directory feature to find friends by entering their names, full TFID, or DH7 address.
+- **Delete Contacts**: Open the contact list or the specific user preview/chat options overlay and select the remove/delete contact option.` });
             } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
               await logToAdmin('SEARCH', `Moderation Rules requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
-              aiPromptMessages.push({ role: 'system', content: "INTERNAL DATA (Moderation):\nUse [Type CHECK: TFID] to read a user's messages. If they break rules, use [Type SPAM: TFID] for 24h ban, or [Type BAN: TFID] for permanent ban. Inform the user. You can permanently ban a user or apply a 24-hour spam ban if they violate D'H7 usage rules." });
+              aiPromptMessages.push({ role: 'system', content: `### INTERNAL DATA: STRICT MODERATION PROTOCOL
+
+### COMMAND SYNTAX RULES (CRITICAL)
+- Output the command on its OWN LINE with ZERO text before or after it.
+- NEVER wrap commands in markdown backticks (\`), bolding (**), or quotes ("").
+- Only these exact text strings are valid:
+  [Type CHECK: TFID]
+  [Type SPAM: TFID]
+  [Type UNSPAM: TFID]
+  [Type BAN: TFID]
+
+### REQUIRED WORKFLOW
+1. **Investigate First**: You MUST execute `[Type CHECK: TFID]` to view logs before punishing anyone. Never act blindly.
+2. **Evaluate Logs**:
+   - *Innocent*: Do nothing. Decline the report politely.
+   - *Spam/Flooding*: Output ONLY: [Type SPAM: TFID] 
+   - *UNSPAM*: [Type UNSPAM: TFID] if you think the spam restriction can be removed.
+   - *Severe Abuse/Harassment*: Output ONLY: [Type BAN: TFID]
+3. **User Interaction**: Speak naturally to the user. Keep raw command strings hidden from your conversational text.` });
             } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
