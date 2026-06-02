@@ -1255,7 +1255,19 @@ app.post('/send', async (req, res) => {
 - WARNING: Passwords cannot be recovered or reset!
 - Log in: Use unique TFID or registered DH7 address.
 - Settings: Click "•••" in header to upload profile picture.
-- Message actions: Swipe left to reply, tap/hold to delete for yourself or copy texts.` });
+- Message actions: Swipe left to reply, tap/hold to delete for yourself or copy texts.
+
+## SUPPORTED_FORMATS_AND_LIMITS
+*Note: Any format not explicitly listed below is NOT supported.*
+- **Text Messages:** Sent via the input bar. Limit: 70,000 characters (excluding spaces).
+- **Video Messages:** Sent via the "+" button. Unlimited storage.
+- **Image Messages:** Sent via the "+" button. Unlimited storage.
+- **Other Files:** Any other file type is sent via the "+" button and classified as "files". Unlimited storage.
+
+##  PLATFORM_INFO
+- **D'H7 Website:** https://dh7.adamdh7.org/
+- **Address of D'H7 Name:** adresse dh7
+- **Apk:** No applications published at this time.` });
             } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
               await logToAdmin('SEARCH', `Moderation Rules requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
