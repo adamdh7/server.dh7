@@ -1203,6 +1203,7 @@ app.post('/send', async (req, res) => {
 If no administrative assistance is needed, reply to the user normally.
 
 - ***Commands must begin with [ and end with ] no other character before or after, commands must be written in English, you only have the 2 commands below no others will be valid.***
+**If you already received the search results from the system, answer the user normally using that data without repeating the command.**
 
 Available Commands:
 - [Type SEARCH: About D'H7] -> Use this IMMEDIATELY for any question regarding D'H7, platform rules, or account management. If you have any doubt, do not guess: use this command.
