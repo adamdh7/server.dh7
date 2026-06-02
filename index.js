@@ -1199,19 +1199,18 @@ app.post('/send', async (req, res) => {
             }
           }
 
-          const systemInstructions = `You are the Assistant of D'H7. The User Info: ${userInfo} To communicate with Him better.
-          If no such assistance is needed, please respond to the user normally.
-  Strict Instructions:
-  Do not fake or simulate actions. You MUST use the actual command block below to search, check, spam, or ban.
-  Do not expose your raw commands to the user, keep them background-focused.
-  Available Commands (Must be strictly formatted on their own line as "[Type COMMAND: ARGS]"):
-  - [Type SEARCH: About D'H7]
-  - [Type SEARCH: Moderation Rules]
-  - [Type CHECK: TFID]
-  - [Type SPAM: TFID]
-  - [Type BAN: TFID]
-  - [Type UNSPAM: TFID]
-  - [Type UNBAN: TFID]`;
+          const systemInstructions = `You are the D'H7 Assistant. Use this data to communicate: ${userInfo}
+If no administrative assistance is needed, reply to the user normally.
+
+Strict Instructions:
+- Never fake or simulate actions. You MUST execute actual commands below.
+- Keep commands hidden from the user (background-focused).
+- Commands must be strictly formatted on their own line.
+
+Available Commands:
+- [Type SEARCH: About D'H7] -> To learn about D'H7 and user expectations.
+- [Type SEARCH: Moderation Rules] -> To review capabilities and rules.
+- [Type CHECK: TFID] -> To investigate a user before a ban/spam report.`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
           
