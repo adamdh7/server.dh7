@@ -1248,26 +1248,15 @@ app.post('/send', async (req, res) => {
               await logToAdmin('SEARCH', `About D'H7 requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
-              aiPromptMessages.push({ role: 'system', content: `[DATA: D'H7 & SETTINGS : Information about D'H7 to better respond to users requests]
-              
-- Sign Up: On Login Screen, click "Create an account" at bottom.
-- Requirements: Name, Birth Year (stored age), D'H7 unique handle (lowercase, unmodifiable), Password.
-- WARNING: Passwords cannot be recovered or reset!
-- Log in: Use unique TFID or registered DH7 address.
-- Settings: Click "•••" in header to upload profile picture.
-- Message actions: Swipe left to reply, tap/hold to delete for yourself or copy texts.
-
-## SUPPORTED_FORMATS_AND_LIMITS
-*Note: Any format not explicitly listed below is NOT supported.*
-- **Text Messages:** Sent via the input bar. Limit: 70,000 characters (excluding spaces).
-- **Video Messages:** Sent via the "+" button. Unlimited storage.
-- **Image Messages:** Sent via the "+" button. Unlimited storage.
-- **Other Files:** Any other file type is sent via the "+" button and classified as "files". Unlimited storage.
-
-##  PLATFORM_INFO
-- **D'H7 Website:** https://dh7.adamdh7.org/
-- **Address of D'H7 Name:** adresse dh7
-- **Apk:** No applications published at this time.` });
+              aiPromptMessages.push({ role: 'system', content: `## DH7_APP_DATA
+- **Accounts:** Sign up at login screen (Needs: Name, Birth Year, lowercase fixed handle, password). **CRITICAL: Passwords CANNOT be recovered.**
+- **Login:** Use TFID or "adresse dh7".
+- **UI Actions:** Header "•••" (Profile Pic). Swipe left (Reply). Tap/hold (Copy/Delete for self).
+- **Formats & Limits:** 
+  - Text via input bar (max 70,000 chars, spaces excluded). 
+  - Images/Videos/Files via "+" the button to the left of the input bar (unlimited storage). 
+  - *Note: Unlisted formats are NOT supported.*
+- **Platform Info:** Web: https://dh7.adamdh7.org/ | App/APK: None published yet.` });
             } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
               await logToAdmin('SEARCH', `Moderation Rules requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
