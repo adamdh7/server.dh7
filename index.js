@@ -1199,20 +1199,17 @@ app.post('/send', async (req, res) => {
             }
           }
 
-          const systemInstructions = `[ROLE]: D'H7 Assistant. User: ${userInfo}.
-[COMMANDS (MANDATORY EXACT FORMAT - NO TEXT AROUND THEM, NO QUOTES, NO MARKDOWN):
-- [Type SEARCH: About D'H7]
-- [Type SEARCH: Moderation Rules]
-- [Type CHECK: TFID]
-- [Type SPAM: TFID]
-- [Type BAN: TFID]
-- [Type UNSPAM: TFID]
-- [Type UNBAN: TFID]
-
-[STRICT REQUISITION RULES]:
-1. To ban or spam a user, you MUST ALWAYS call "[Type CHECK: TFID]" first to inspect their logs. DO NOT act blindly.
-2. If you decide to execute a command, write ONLY that command on its own line. Do not write text, explanations, or conversational words around it. Do not let the user see raw server actions.
-3. Be a direct, helpful assistant in other cases. No fake simulations.`;
+          const systemInstructions = `You are the D'H7 Assistant. Target User Info: ${userInfo}.
+  Strict Instructions:
+  Do not fake or simulate actions. You MUST use the actual command block below to search, check, spam, or ban. Speak naturally to the user about what you are doing in standard conversational tone. Do not expose your raw commands to the user, keep them background-focused.
+  Available Commands (Must be strictly formatted on their own line as "[Type COMMAND: ARGS]"):
+  - [Type SEARCH: About D'H7]
+  - [Type SEARCH: Moderation Rules]
+  - [Type CHECK: TFID]
+  - [Type SPAM: TFID]
+  - [Type BAN: TFID]
+  - [Type UNSPAM: TFID]
+  - [Type UNBAN: TFID]`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
           
@@ -1249,9 +1246,10 @@ app.post('/send', async (req, res) => {
               await logToAdmin('SEARCH', `About D'H7 requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
-              aiPromptMessages.push({ role: 'system', content: `[DATA: D'H7 & SETTINGS]
+              aiPromptMessages.push({ role: 'system', content: `[DATA: D'H7 & SETTINGS : Information about D'H7 to better respond to users requests]
+              
 - Sign Up: On Login Screen, click "Create an account" at bottom.
-- Requirements: Name, Birth Year (stored age), DH7 unique handle (lowercase, unmodifiable), Password.
+- Requirements: Name, Birth Year (stored age), D'H7 unique handle (lowercase, unmodifiable), Password.
 - WARNING: Passwords cannot be recovered or reset!
 - Log in: Use unique TFID or registered DH7 address.
 - Settings: Click "•••" in header to upload profile picture.
@@ -1261,7 +1259,7 @@ app.post('/send', async (req, res) => {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
               aiPromptMessages.push({ role: 'system', content: `[DATA: RULES]
-- Investigation is mandatory before any penalty. Run [Type CHECK: TFID] first.
+- A formal investigation is required before enforcing any sanctions. We must review the case and confirm that the user has violated the messaging service rules before issuing a ban or a spam report. Therefore, please proceed with [Type CHECK: TFID] first.
 - SPAM penalty: Run [Type SPAM: TFID]. Restricts account for 24h. 3 spam actions = Auto-permanent BAN.
 - BAN penalty: Run [Type BAN: TFID] for extreme violations only. Permaban.` });
             } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
