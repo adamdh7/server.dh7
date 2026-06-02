@@ -1205,8 +1205,8 @@ If no administrative assistance is needed, reply to the user normally.
 - ***Commands must begin with [ and end with ] no other character before or after, commands must be written in English, you only have the 2 commands below no others will be valid.***
 
 Available Commands:
-- [Type SEARCH: About D'H7] -> To learn about D'H7 and user expectations.
-- [Type SEARCH: Moderation Rules] -> To review Your capabilities.`;
+- [Type SEARCH: About D'H7] -> To learn everything about D'H7, use it whenever you have a doubt.
+- [Type SEARCH: Moderation Rules] -> To find out your capabilities as a D'H7 Assistant and as a D'H7 Moderator, whenever you doubt what you can or cannot do, don't invent, use it.`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
           
