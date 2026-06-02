@@ -1204,13 +1204,11 @@ If no administrative assistance is needed, reply to the user normally.
 
 Strict Instructions:
 - Never fake or simulate actions. You MUST execute actual commands below.
-- Keep commands hidden from the user (background-focused).
-- Commands must be strictly formatted on their own line.
+- Commands must begin with [ and end with ]; no other characters before or after. Commands must be written in English.
 
 Available Commands:
 - [Type SEARCH: About D'H7] -> To learn about D'H7 and user expectations.
-- [Type SEARCH: Moderation Rules] -> To review capabilities and rules.
-- [Type CHECK: TFID] -> To investigate a user before a ban/spam report.`;
+- [Type SEARCH: Moderation Rules] -> To review capabilities and rules.`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
           
