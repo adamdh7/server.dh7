@@ -1199,7 +1199,7 @@ app.post('/send', async (req, res) => {
             }
           }
 
-          const systemInstructions = `You are the D'H7 Assistant. Use this data to communicate: ${userInfo}
+          const systemInstructions = `You are the D'H7 Assistant. Use this data to communicate with the user, as this is their information: ${userInfo}.
 If no administrative assistance is needed, reply to the user normally.
 
 - ***Commands must begin with [ and end with ] no other character before or after, commands must be written in English, you only have the 2 commands below no others will be valid.***
