@@ -1,13 +1,15 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const axios = require('axios');
 const multer = require('multer');
 const { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
 const ALLOWED_ORIGINS = new Set([
@@ -23,11 +25,9 @@ const ALLOWED_ORIGINS = new Set([
 const ALLOWED_HOSTS = new Set(['dh7.adamdh7.org', 'quiz.adamdh7.org', 'ai.adamdh7.org', 'www.adamdh7.org']);
 const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
 
-app.use(bodyParser.json());
-
 const corsOptions = {
   origin: function(origin, callback) {
-    if (!origin || origin === 'null' || origin.startsWith('file://')) {
+    if (!origin || origin === 'null' || origin.startsWith('file:')) {
       return callback(null, true);
     }
     try {
@@ -42,12 +42,38 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
+const io = new Server(server, {
+  cors: corsOptions
+});
+
+io.on('connection', (socket) => {
+  socket.on('register', (tfid) => {
+    if (tfid) socket.join(tfid);
+  });
+  socket.on('join_group', (groupId) => {
+    if (groupId) socket.join(groupId);
+  });
+});
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({ success: false, error: 'Invalid data format' });
+  }
+  next();
+});
+
 mongoose.connect(process.env.MONGO_URI);
 
 const userSchema = new mongoose.Schema({
   tfid: { type: String, default: '' },
   nom: String,
   prenom: { type: String, default: '' },
+  pseudo: { type: String, default: '' },
+  nameDisplayPreference: { type: String, default: 'nameOnly' },
+  readReceiptsEnabled: { type: Boolean, default: true },
   dh7: String,
   age: String,
   password: { type: String, default: '' },
@@ -430,6 +456,7 @@ async function generateAiNotification(targetTfid, englishTemplate, adminLogs = '
       read: false
     });
     await systemMessage.save();
+    io.to(targetTfid).emit('new_message', systemMessage);
   } catch (error) {
     try {
       const fallbackMessage = new Message({
@@ -440,6 +467,7 @@ async function generateAiNotification(targetTfid, englishTemplate, adminLogs = '
         read: false
       });
       await fallbackMessage.save();
+      io.to(targetTfid).emit('new_message', fallbackMessage);
     } catch (e) {}
   }
 }
@@ -454,6 +482,7 @@ async function logToAdmin(action, details) {
       read: false
     });
     await logMessage.save();
+    io.to('TF-7777777').emit('new_message', logMessage);
   } catch (e) {}
 }
 
@@ -517,6 +546,28 @@ app.post('/login', async (req, res) => {
   }
 });
 
+app.post('/update-profile', async (req, res) => {
+  try {
+    const { tfid, nom, pseudo, nameDisplayPreference, readReceiptsEnabled } = req.body;
+    if (!tfid) return res.json({ success: false, error: 'Missing TFID' });
+
+    const updateData = {};
+    if (nom !== undefined) updateData.nom = nom;
+    if (pseudo !== undefined) updateData.pseudo = pseudo;
+    if (nameDisplayPreference !== undefined) updateData.nameDisplayPreference = nameDisplayPreference;
+    if (readReceiptsEnabled !== undefined) updateData.readReceiptsEnabled = readReceiptsEnabled;
+
+    await User.updateOne({ tfid }, { $set: updateData });
+    const updatedUser = await User.findOne({ tfid });
+    
+    io.emit('user_updated', sanitizeUser(updatedUser));
+    
+    res.json({ success: true, user: sanitizeUser(updatedUser) });
+  } catch (e) {
+    res.json({ success: false, error: 'Update failed' });
+  }
+});
+
 app.get('/users', async (req, res) => {
   try {
     const users = await User.find({ banned: { $ne: true } });
@@ -559,6 +610,7 @@ app.post('/search', async (req, res) => {
       banned: { $ne: true },
       $or: [
         { nom: { $regex: q, $options: 'i' } },
+        { pseudo: { $regex: q, $options: 'i' } },
         { prenom: { $regex: q, $options: 'i' } },
         { dh7: { $regex: q, $options: 'i' } },
         { tfid: { $regex: q, $options: 'i' } }
@@ -587,6 +639,7 @@ app.post('/group', async (req, res) => {
         admins: [sender_tfid]
       });
       await newGroup.save();
+      io.to(sender_tfid).emit('group_updated', newGroup);
       return res.json({ success: true, group_tfid: tfid });
     }
 
@@ -602,6 +655,8 @@ app.post('/group', async (req, res) => {
       if (!group.membres.includes(target_tfid)) {
         group.membres.push(target_tfid);
         await group.save();
+        io.to(target_tfid).emit('group_updated', group);
+        io.to(group_tfid).emit('group_updated', group);
       }
       return res.json({ success: true });
     }
@@ -612,6 +667,8 @@ app.post('/group', async (req, res) => {
       group.membres = group.membres.filter(id => id !== target_tfid);
       group.admins = group.admins.filter(id => id !== target_tfid);
       await group.save();
+      io.to(target_tfid).emit('group_removed', group_tfid);
+      io.to(group_tfid).emit('group_updated', group);
       if (group.membres.length === 0) {
         await Message.deleteMany({ to: group_tfid });
         await Group.deleteOne({ tfid: group_tfid });
@@ -626,6 +683,8 @@ app.post('/group', async (req, res) => {
         group.proprietaire = '';
       }
       await group.save();
+      io.to(sender_tfid).emit('group_removed', group_tfid);
+      io.to(group_tfid).emit('group_updated', group);
       if (group.membres.length === 0) {
         await Message.deleteMany({ to: group_tfid });
         await Group.deleteOne({ tfid: group_tfid });
@@ -638,6 +697,7 @@ app.post('/group', async (req, res) => {
       if (!group.admins.includes(target_tfid)) {
         group.admins.push(target_tfid);
         await group.save();
+        io.to(group_tfid).emit('group_updated', group);
       }
       return res.json({ success: true });
     }
@@ -646,6 +706,7 @@ app.post('/group', async (req, res) => {
       if (!isProprietaire) return res.json({ success: false, error: 'Unauthorized action' });
       await Message.deleteMany({ to: group_tfid });
       await Group.deleteOne({ tfid: group_tfid });
+      io.to(group_tfid).emit('group_removed', group_tfid);
       return res.json({ success: true });
     }
 
@@ -724,6 +785,8 @@ app.post('/upload-profile', upload.single('image'), async (req, res) => {
 
       const logoUrl = `https://pub-24986ee77a4440dba7c072922c670547.r2.dev/${dynamicKey}`;
       await User.updateOne({ tfid: tfid }, { $set: { logo: logoUrl } });
+      const updatedUser = await User.findOne({ tfid: tfid });
+      io.emit('user_updated', sanitizeUser(updatedUser));
       res.json({ success: true, logo: logoUrl });
     } else {
       res.json({ success: false, error: 'Upload verification failed' });
@@ -757,6 +820,9 @@ app.post('/DH7', async (req, res) => {
       
       if (systemMessages.length > 0) {
         await Message.insertMany(systemMessages);
+        for (const msg of systemMessages) {
+          io.to(msg.to).emit('new_message', msg);
+        }
       }
       return res.json({ success: true });
     } else {
@@ -770,6 +836,7 @@ app.post('/DH7', async (req, res) => {
           read: false
         });
         await sysMsg.save();
+        io.to(targetUser.tfid).emit('new_message', sysMsg);
         return res.json({ success: true });
       }
       return res.json({ success: false, error: 'User not found' });
@@ -802,9 +869,9 @@ app.post('/send', async (req, res) => {
           read: true
         });
         await cmdMsg.save();
+        io.to(receiver_tfid).emit('new_message', cmdMsg);
 
         let replyText = "";
-        let logsExtracted = "";
 
         if (checkMatch) {
           const targetId = checkMatch[1].trim();
@@ -843,6 +910,7 @@ app.post('/send', async (req, res) => {
                 read: false
               });
               await banMsg.save();
+              io.to(targetUserObj.tfid).emit('new_message', banMsg);
               
               replyText = `[ADMIN SPAM ALERT]: User ${targetUserObj.tfid} restricted 3 times. BANNED permanently.`;
               
@@ -861,6 +929,7 @@ app.post('/send', async (req, res) => {
                 read: false
               });
               await spamMsg.save();
+              io.to(targetUserObj.tfid).emit('new_message', spamMsg);
               
               replyText = `[ADMIN SPAM SUCCESS]: User ${targetUserObj.tfid} restricted for 24h. Spam count: ${newSpamCount}/3.`;
               
@@ -883,6 +952,7 @@ app.post('/send', async (req, res) => {
               read: false
             });
             await banMsg.save();
+            io.to(targetUserObj.tfid).emit('new_message', banMsg);
             
             replyText = `[ADMIN BAN SUCCESS]: User ${targetUserObj.tfid} has been permanently banned.`;
             
@@ -933,6 +1003,7 @@ app.post('/send', async (req, res) => {
           read: false
         });
         await replyMsg.save();
+        io.to(receiver_tfid).emit('new_message', replyMsg);
 
         return res.json({ success: true });
       }
@@ -981,21 +1052,28 @@ app.post('/send', async (req, res) => {
     }
 
     if (message.includes('[Type (<VIEW>)]') || message.includes('[Type (<VIEW)>)]')) {
+      const reader = await User.findOne({ tfid: sender_tfid });
+      if (reader && reader.readReceiptsEnabled === false) {
+        return res.json({ success: true });
+      }
+
       if (isGroup) {
         await Message.updateMany(
           { to: receiver_tfid },
           { $set: { read: true } }
         );
+        io.to(receiver_tfid).emit('messages_read', { by: sender_tfid, group: receiver_tfid });
       } else {
         await Message.updateMany(
           {
             $or: [
-              { sender_tfid, to: receiver_tfid },
+              { from: sender_tfid, to: receiver_tfid },
               { from: receiver_tfid, to: sender_tfid }
             ]
           },
           { $set: { read: true } }
         );
+        io.to(receiver_tfid).emit('messages_read', { by: sender_tfid });
       }
       return res.json({ success: true });
     }
@@ -1007,6 +1085,7 @@ app.post('/send', async (req, res) => {
           { to: targetTfid },
           { $addToSet: { deletedFor: sender_tfid } }
         );
+        io.to(targetTfid).emit('messages_deleted', { by: sender_tfid });
       } else {
         await Message.updateMany(
           {
@@ -1017,6 +1096,7 @@ app.post('/send', async (req, res) => {
           },
           { $addToSet: { deletedFor: sender_tfid } }
         );
+        io.to(targetTfid).emit('messages_deleted', { by: sender_tfid });
       }
       return res.json({ success: true });
     }
@@ -1042,6 +1122,7 @@ app.post('/send', async (req, res) => {
           }
         }
       }
+      io.to(receiver_tfid).emit('message_deleted_single', { by: sender_tfid, targetId });
       return res.json({ success: true });
     }
 
@@ -1063,6 +1144,7 @@ app.post('/send', async (req, res) => {
           await Message.deleteOne({ _id: m._id });
         }
       }
+      io.to(receiver_tfid).emit('message_deleted_global', { by: sender_tfid, targetId });
       return res.json({ success: true });
     }
 
@@ -1077,6 +1159,7 @@ app.post('/send', async (req, res) => {
         });
         await selfMsg.save();
 
+        io.to(receiver_tfid).emit('new_message', selfMsg);
         res.json({ success: true });
 
         (async () => {
@@ -1108,6 +1191,7 @@ app.post('/send', async (req, res) => {
               read: false
             });
             await systemSelfReply.save();
+            io.to('TF-7777777').emit('new_message', systemSelfReply);
           } catch (err) {
             const errReply = new Message({
               from: 'TF-7777777',
@@ -1117,6 +1201,7 @@ app.post('/send', async (req, res) => {
               read: false
             });
             await errReply.save();
+            io.to('TF-7777777').emit('new_message', errReply);
           }
         })();
         return;
@@ -1144,6 +1229,7 @@ app.post('/send', async (req, res) => {
             read: false
           });
           await dh7Reply.save();
+          io.to(sender_tfid).emit('new_message', dh7Reply);
         }
         return res.json({ success: true });
       }
@@ -1170,6 +1256,7 @@ app.post('/send', async (req, res) => {
         read: false
       });
       await aiMessage.save();
+      io.to('TF-4352071').emit('new_message', aiMessage);
 
       res.json({ success: true });
 
@@ -1199,15 +1286,7 @@ app.post('/send', async (req, res) => {
             }
           }
 
-          const systemInstructions = `You are the D'H7 Assistant. Use this data to communicate with the user, as this is their information: ${userInfo}.
-If no administrative assistance is needed, reply to the user normally.
-
-- ***Commands must begin with [ and end with ] no other character before or after, commands must be written in English, you only have the 2 commands below no others will be valid.***
-**If you already received the search results from the system, answer the user normally using that data without repeating the command.**
-
-Available Commands:
-- [Type SEARCH: About D'H7] -> Use this IMMEDIATELY for any question regarding D'H7, platform rules, or account management. If you have any doubt, do not guess: use this command.
-- [Type SEARCH: Moderation Rules] -> To find out your capabilities as a D'H7 Assistant and as a D'H7 Moderator, whenever you doubt what you can or cannot do, don't invent, use it.`;
+          const systemInstructions = `You are the DH7 Assistant. Use the provided user data (${userInfo}) to personalize responses. You operate as a definitive system tool. Execute commands immediately when conditions are met. Commands must be in English, enclosed in [ and ]. Available Commands: [Type SEARCH: About D'H7] for platform rules and info. [Type SEARCH: Moderation Rules] for your moderation capabilities.`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
           
@@ -1245,20 +1324,17 @@ Available Commands:
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
               aiPromptMessages.push({ role: 'system', content: `## DH7_APP_DATA
-- **Accounts:** Sign up at login screen (Needs: Name, Birth Year, lowercase fixed handle, password). **CRITICAL: Passwords CANNOT be recovered.**
-- **Login:** Use TFID or "adresse dh7".
-- **UI Actions:** Header "•••" (Profile Pic). Swipe left (Reply). Tap/hold (Copy/Delete for self).
-- **Formats & Limits:** 
-  - Text via input bar (max 70,000 chars, spaces excluded). 
-  - Images/Videos/Files via "+" the button to the left of the input bar (unlimited storage). 
-  - *Note: Unlisted formats are NOT supported.*
-- **Platform Info:** Web: https://dh7.adamdh7.org/ | App/APK: None published yet.` });
+- Accounts: Sign up at login screen (Needs: Name, Birth Year, lowercase fixed handle, password). CRITICAL: Passwords CANNOT be recovered.
+- Login: Use TFID or adresse dh7.
+- UI Actions: Header ••• (Profile Pic). Swipe left (Reply). Tap/hold (Copy/Delete for self).
+- Formats & Limits: Text via input bar (max 70,000 chars, spaces excluded). Images/Videos/Files via + button.
+- Platform Info: Web: https://dh7.adamdh7.org/ | App/APK: None published yet.` });
             } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
               await logToAdmin('SEARCH', `Moderation Rules requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
               aiPromptMessages.push({ role: 'system', content: `[DATA: RULES]
-- A formal investigation is required before enforcing any sanctions. We must review the case and confirm that the user has violated the messaging service rules before issuing a ban or a spam report. Therefore, please proceed with [Type CHECK: TFID] first.
+- A formal investigation is required before enforcing any sanctions. Proceed with [Type CHECK: TFID] first.
 - SPAM penalty: Run [Type SPAM: TFID]. Restricts account for 24h. 3 spam actions = Auto-permanent BAN.
 - BAN penalty: Run [Type BAN: TFID] for extreme violations only. Permaban.` });
             } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
@@ -1306,6 +1382,7 @@ Available Commands:
                     read: false
                   });
                   await banMsg.save();
+                  io.to(targetUserObj.tfid).emit('new_message', banMsg);
                   await logToAdmin('BAN_SUCCESS', `TFID: ${targetUserObj.tfid} has been permanently banned`);
                   
                   const noticeEng = `This is an official system notification. Your account ${targetUserObj.tfid} has been permanently banned due to severe violations of the D'H7 Community Guidelines. All functions are suspended.`;
@@ -1345,6 +1422,7 @@ Available Commands:
                       read: false
                     });
                     await banMsg.save();
+                    io.to(targetUserObj.tfid).emit('new_message', banMsg);
                     await logToAdmin('BAN_SUCCESS_SPAM_LIMIT', `TFID: ${targetUserObj.tfid} automatically banned due to spam limit`);
                     
                     const noticeEng = `Your account ${targetUserObj.tfid} has been permanently banned after receiving 3 spam restrictions. Reason: Maximum spam threshold reached.`;
@@ -1361,6 +1439,7 @@ Available Commands:
                       read: false
                     });
                     await spamMsg.save();
+                    io.to(targetUserObj.tfid).emit('new_message', spamMsg);
                     await logToAdmin('SPAM_SUCCESS', `TFID: ${targetUserObj.tfid} has been restricted for spam (24h)`);
                     
                     const noticeEng = `Your account ${targetUserObj.tfid} is temporarily restricted for 24 hours due to spamming behavior. Your limit is currently ${newSpamCount}/3.`;
@@ -1428,6 +1507,7 @@ Available Commands:
             read: false
           });
           await aiReply.save();
+          io.to(sender_tfid).emit('new_message', aiReply);
           
         } catch (e) {
           const errorMsg = e.message ? ` (Internal system failure: ${e.message})` : '';
@@ -1439,6 +1519,7 @@ Available Commands:
             read: false
           });
           await errorReply.save();
+          io.to(sender_tfid).emit('new_message', errorReply);
         }
         await checkStorageLimit();
       })();
@@ -1454,6 +1535,10 @@ Available Commands:
       read: false
     });
     await newMsg.save();
+    
+    io.to(receiver_tfid).emit('new_message', newMsg);
+    io.to(sender_tfid).emit('message_sent_confirm', newMsg);
+    
     await cleanupOldMessages();
     await checkStorageLimit();
     res.json({ success: true });
@@ -1465,10 +1550,17 @@ Available Commands:
 app.post('/mark-read', async (req, res) => {
   try {
     const { sender_tfid, receiver_tfid } = req.body;
+    
+    const reader = await User.findOne({ tfid: receiver_tfid });
+    if (reader && reader.readReceiptsEnabled === false) {
+      return res.json({ success: true });
+    }
+
     await Message.updateMany(
       { from: sender_tfid, to: receiver_tfid },
       { $set: { read: true } }
     );
+    io.to(sender_tfid).emit('messages_read', { by: receiver_tfid });
     res.json({ success: true });
   } catch (e) {
     res.json({ success: false, error: 'Internal Server Error' });
@@ -1532,6 +1624,6 @@ app.post('/sync', async (req, res) => {
 });
 
 ensureStorageHealth().then(() => {
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
   });
 });
