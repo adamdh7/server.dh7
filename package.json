@@ -1,7 +1,7 @@
 {
   "name": "dh7-server",
   "version": "1.0.0",
-  "description": "Backend pour Digital Hub 7 avec MongoDB, Cloudflare AI et R2 Storage",
+  "description": "Backend pour Digital Hub 7 avec MongoDB, Cloudflare AI, R2 Storage et WebSockets",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -14,7 +14,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "mongoose": "^8.2.0",
-    "multer": "^1.4.5-lts.1"
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.7.4"
   },
   "engines": {
     "node": ">=18.0.0"
