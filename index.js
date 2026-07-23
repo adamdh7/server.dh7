@@ -17,7 +17,7 @@ const ALLOWED_ORIGINS = new Set([
   'https://dh7.adamdh7.org', 
   'https://ai.adamdh7.org', 
   'https://mizik.adamdh7.org',
-  'https://server.ai.adamdh7.org', 
+  'https://poste.adamdh7.org', 
   'https://quiz.adamdh7.org', 
   'https://dh7test.adamdh7.org', 
   'https://www.adamdh7.org'
