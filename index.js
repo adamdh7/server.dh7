@@ -16,13 +16,13 @@ const ALLOWED_ORIGINS = new Set([
   'http://localhost:7000', 
   'https://dh7.adamdh7.org', 
   'https://ai.adamdh7.org', 
-  'https://mizik.adamdh7.org',
+  'https://mizik.sou.adamdh7.org',
   'https://poste.adamdh7.org', 
   'https://quiz.adamdh7.org', 
   'https://dh7test.adamdh7.org', 
   'https://www.adamdh7.org'
 ]);
-const ALLOWED_HOSTS = new Set(['dh7.adamdh7.org', 'quiz.adamdh7.org', 'ai.adamdh7.org', 'www.adamdh7.org']);
+const ALLOWED_HOSTS = new Set(['dh7.adamdh7.org', 'tout.adamdh7.org', 'bref.adamdh7.org', 'www.adamdh7.org']);
 const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
 
 const corsOptions = {
