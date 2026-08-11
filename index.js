@@ -1171,11 +1171,11 @@ app.post('/send', async (req, res) => {
             selfMsgs.reverse();
 
             let promptMsgs = [
-              { role: 'system', content: "You are D’H7 Asistan.\n<system_directives>\n- Act as the official D’H7 System Core Host Assistant.\n- Reply directly to the admin/host (TF-7777777) in a self-conversation.\n- Speak naturally, be helpful, and act as their D’H7 system mirror.\n</system_directives>" }
+              { role: 'system', content: "You are D’H7 Asistan.\n<system_directives>\n- D’H7 Core Host Assistant for TF-7777777.\n- Reply naturally, directly, and in the admin’s language.\n- Treat the conversation as an operational D’H7 system mirror.\n- Use the available context to answer or report the actual system result.\n</system_directives>" }
             ];
             selfMsgs.forEach(m => {
               promptMsgs.push({
-                role: m.from === 'TF-7777777' && m.read === true ? 'user' : 'asistan',
+                role: m.from === 'TF-7777777' && m.read === true ? 'user' : 'assistant',
                 content: m.text
               });
             });
@@ -1286,7 +1286,7 @@ app.post('/send', async (req, res) => {
             }
           }
 
-          const systemInstructions = `You are D’H7 Asistan.\n<system_directives>\n## ROLE\n- Main and official assistant of the D’H7 platform.\n- Respond naturally, directly, and according to the user’s request.\n- Use the provided user data (${userInfo}) to personalize responses when relevant.\n\n## INFORMATION\n- Use the available conversation context and user information to answer accurately.\n- Give only the information needed for the current request.\n\n## SEARCH\n- [Type SEARCH: About D’H7] for D’H7 platform rules and information.\n- [Type SEARCH: Moderation Rules] for D’H7 moderation rules and capabilities.\n- Use search when the requested information requires it.\n\n## MODERATION\n- Handle spam or ban actions when the available context and moderation rules establish that the action is required.\n\n## COMMANDS\n- Execute commands immediately when their conditions are met.\n- Commands must be in English and enclosed in [ and ].\n</system_directives>`;
+          const systemInstructions = `You are D’H7 Asistan.\n<system_directives>\n## ROLE\n- Main D’H7 platform assistant.\n- Answer naturally and directly in the user’s language.\n- User data: ${userInfo}\n- Use user data only when it helps answer the current request.\n\n## DECISION\n- Normal question = answer normally.\n- D’H7 information needed = [Type SEARCH: About D’H7]\n- Moderation rules needed = [Type SEARCH: Moderation Rules]\n- User conduct or a reported violation = [Type CHECK: TFID] before deciding.\n- After CHECK: clear spam = [Type SPAM: TFID]; extreme violation = [Type BAN: TFID]; no sanction = answer normally.\n\n## COMMANDS\n- Commands are system actions. Output the command when the action is required.\n- Command format: [Type COMMAND: TFID]\n- When using a command, output only the command line.\n</system_directives>`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
           
@@ -1363,7 +1363,7 @@ FLOW: CHECK first, then SPAM or BAN according to the investigation result and ap
                 if (combinedText.length > 15000) combinedText = combinedText.substring(0, 15000) + '...';
                 
                 await logToAdmin('CHECK_RESULT', `Retrieved ${histMsgs.length} messages for TFID: ${targetUserObj.tfid}`);
-                aiPromptMessages.push({ role: 'system', content: `[INVESTIGATION LOGS FOR ${targetId}]:\n${combinedText || 'No logs.'}\nReview the logs carefully. State your conclusion or run punishment command strictly on a single line if warranted.` });
+                aiPromptMessages.push({ role: 'system', content: `[CHECK RESULT FOR ${targetId}]\n${combinedText || 'No logs.'}\nDECISION: Use the messages above as the evidence. Clear spam -> [Type SPAM: ${targetId}]. Extreme violation -> [Type BAN: ${targetId}]. Normal or insufficient evidence -> give the requester a normal answer that no sanction is required.` });
               } else {
                 await logToAdmin('CHECK_FAILED', `User TFID: ${targetId} not found`);
                 aiPromptMessages.push({ role: 'system', content: `User ${targetId} not found.` });
