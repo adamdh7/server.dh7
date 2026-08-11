@@ -1290,7 +1290,7 @@ app.post('/send', async (req, res) => {
 Current user: ${userInfo}
 
 AVAILABLE COMMANDS (Output EXACTLY as shown to trigger):
-- [Type SEARCH: About D'H7] -> Get platform rules.
+- [Type SEARCH: About D'H7] -> Get platform informations.
 - [Type SEARCH: Moderation Rules] -> Get moderation guidelines.
 - [Type CHECK: TFID] -> View a user's chat history.
 - [Type SPAM: TFID] -> Restrict an abusive user for 24h.
@@ -1380,7 +1380,7 @@ FLOW: CHECK first, then SPAM or BAN according to the investigation result and ap
                 aiPromptMessages.push({ role: 'system', content: `[SYSTEM LOGS - ${targetId}]:\n${combinedText || 'No logs found.'}\n\nBased on these logs, evaluate if the user broke the rules. Output [Type SPAM: ${targetId}], [Type BAN: ${targetId}], or reply normally explaining why no action is needed.` });
               } else {
                 await logToAdmin('CHECK_FAILED', `User TFID: ${targetId} not found`);
-                aiPromptMessages.push({ role: 'system', content: `User ${targetId} not found. Inform the user.` });
+                aiPromptMessages.push({ role: 'system', content: `User ${targetId} not found.` });
               }
             } else if (responseText.match(/\[Type BAN:\s*([^\]]+)\]/i)) {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
