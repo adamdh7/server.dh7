@@ -439,7 +439,7 @@ async function generateAiNotification(targetTfid, englishTemplate, adminLogs = '
       userLanguageContext = userLanguageContext.substring(0, 7000) + '... (truncated)';
     }
 
-    const systemPrompt = "You are D’H7 Asistan.\n<system_directives>\n- Act exclusively as D’H7 Asistan, the official D’H7 Platform System Translator.\n- Translate the official notification into the user’s preferred language.\n- Explain restrictions or bans strictly from the provided Admin logs. Never invent information.\n- Keep the tone official, objective, and clear.\n- Output ONLY the final translated message. No greetings, explanations, or markdown.\n</system_directives>";
+    const systemPrompt = `You are D'H7 Asistan. Task: Translate the official template into the language used in the user context. Output EXACTLY the translated text and nothing else.`;
     const userPrompt = `[ADMIN INVESTIGATION CONTEXT]:\n${adminLogs || 'No specific logs.'}\n\n[USER RECENT CONVERSATIONS WITH OTHERS]:\n${userLanguageContext || 'No past external messages.'}\n\n[OFFICIAL TEMPLATE TO TRANSLATE]:\n${englishTemplate}`;
     
     const response = await executeAiRequest([
@@ -1171,7 +1171,7 @@ app.post('/send', async (req, res) => {
             selfMsgs.reverse();
 
             let promptMsgs = [
-              { role: 'system', content: "You are D’H7 Asistan.\n<system_directives>\n- D’H7 Core Host Assistant for TF-7777777.\n- Reply naturally, directly, and in the admin’s language.\n- Treat the conversation as an operational D’H7 system mirror.\n- Use the available context to answer or report the actual system result.\n</system_directives>" }
+              { role: 'system', content: `You are the D'H7 System Core. You are speaking directly with the Admin (TF-7777777). Be concise, technical, and ready to assist with system operations.` }
             ];
             selfMsgs.forEach(m => {
               promptMsgs.push({
@@ -1286,7 +1286,21 @@ app.post('/send', async (req, res) => {
             }
           }
 
-          const systemInstructions = `You are D’H7 Asistan.\n<system_directives>\n## ROLE\n- Main D’H7 platform assistant.\n- Answer naturally and directly in the user’s language.\n- User data: ${userInfo}\n- Use user data only when it helps answer the current request.\n\n## DECISION\n- Normal question = answer normally.\n- D’H7 information needed = [Type SEARCH: About D’H7]\n- Moderation rules needed = [Type SEARCH: Moderation Rules]\n- User conduct or a reported violation = [Type CHECK: TFID] before deciding.\n- After CHECK: clear spam = [Type SPAM: TFID]; extreme violation = [Type BAN: TFID]; no sanction = answer normally.\n\n## COMMANDS\n- Commands are system actions. Output the command when the action is required.\n- Command format: [Type COMMAND: TFID]\n- When using a command, output only the command line.\n</system_directives>`;
+          const systemInstructions = `You are Asistan, the D'H7 platform AI.
+Current user: ${userInfo}
+
+AVAILABLE COMMANDS (Output EXACTLY as shown to trigger):
+- [Type SEARCH: About D'H7] -> Get platform rules.
+- [Type SEARCH: Moderation Rules] -> Get moderation guidelines.
+- [Type CHECK: TFID] -> View a user's chat history.
+- [Type SPAM: TFID] -> Restrict an abusive user for 24h.
+- [Type BAN: TFID] -> Permanently ban a dangerous user.
+
+LOGIC:
+1. If asked about D'H7, output the SEARCH command.
+2. If a user complains about someone, output the CHECK command first.
+3. Based on CHECK results, decide whether to SPAM, BAN, or tell the user no action is needed.
+4. Answer directly and naturally. Respond to the user's current message.`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
           
@@ -1323,7 +1337,7 @@ app.post('/send', async (req, res) => {
               await logToAdmin('SEARCH', `About D'H7 requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
-aiPromptMessages.push({ role: 'system', content: `## DH7_APP_DATA
+              aiPromptMessages.push({ role: 'system', content: `## DH7_APP_DATA
 Platform: D'H7 (Digital HUB 7)
 Account creation: Name, First Name, DH7 ID, Birth Date, Password
 DH7 ID format: lowercase letters and numbers
@@ -1336,21 +1350,21 @@ Text limit: 70,000 characters excluding spaces
 Website: https://dh7.adamdh7.org/
 App/APK: None published
 Use these facts when answering questions about D'H7.` });
-} else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
-  await logToAdmin('SEARCH', `Moderation Rules requested by ${sender_tfid}`);
-  currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
-  aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
-  aiPromptMessages.push({ role: 'system', content: `## DH7_MODERATION_RULES
+            } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
+              await logToAdmin('SEARCH', `Moderation Rules requested by ${sender_tfid}`);
+              currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
+              aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
+              aiPromptMessages.push({ role: 'system', content: `## DH7_MODERATION_RULES
 CHECK: [Type CHECK: TFID] = investigate the target account
 SPAM: [Type SPAM: TFID] = 24-hour account restriction
 SPAM ESCALATION: 3 spam actions = permanent BAN
 BAN: [Type BAN: TFID] = permanent ban for extreme violations
 FLOW: CHECK first, then SPAM or BAN according to the investigation result and applicable rules` });
-} else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
-  currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
-  const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
-  const targetId = match[1].trim();
-  aiPromptMessages.push({ role: 'assistant', content: `[Type CHECK: ${targetId}]` });
+            } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
+              currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
+              const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
+              const targetId = match[1].trim();
+              aiPromptMessages.push({ role: 'assistant', content: `[Type CHECK: ${targetId}]` });
               
               await logToAdmin('CHECK_INITIATED', `Checking messages for TFID: ${targetId} requested by ${sender_tfid}`);
 
@@ -1363,10 +1377,10 @@ FLOW: CHECK first, then SPAM or BAN according to the investigation result and ap
                 if (combinedText.length > 15000) combinedText = combinedText.substring(0, 15000) + '...';
                 
                 await logToAdmin('CHECK_RESULT', `Retrieved ${histMsgs.length} messages for TFID: ${targetUserObj.tfid}`);
-                aiPromptMessages.push({ role: 'system', content: `[CHECK RESULT FOR ${targetId}]\n${combinedText || 'No logs.'}\nDECISION: Use the messages above as the evidence. Clear spam -> [Type SPAM: ${targetId}]. Extreme violation -> [Type BAN: ${targetId}]. Normal or insufficient evidence -> give the requester a normal answer that no sanction is required.` });
+                aiPromptMessages.push({ role: 'system', content: `[SYSTEM LOGS - ${targetId}]:\n${combinedText || 'No logs found.'}\n\nBased on these logs, evaluate if the user broke the rules. Output [Type SPAM: ${targetId}], [Type BAN: ${targetId}], or reply normally explaining why no action is needed.` });
               } else {
                 await logToAdmin('CHECK_FAILED', `User TFID: ${targetId} not found`);
-                aiPromptMessages.push({ role: 'system', content: `User ${targetId} not found.` });
+                aiPromptMessages.push({ role: 'system', content: `User ${targetId} not found. Inform the user.` });
               }
             } else if (responseText.match(/\[Type BAN:\s*([^\]]+)\]/i)) {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
