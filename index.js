@@ -333,24 +333,24 @@ async function ensureStorageHealth() {
     if (!aiUserExists) {
       await User.create({
         tfid: 'TF-4352071',
-        nom: "Assistant",
+        nom: "Asistan",
         prenom: '',
-        dh7: 'assistant@dh7.tf',
+        dh7: 'asistan@dh7.tf',
         age: '0',
         password: '',
-        logo: 'https://dh7.adamdh7.org/DH72.png',
+        logo: 'https://ai.adamdh7.org/asistan.png',
         banned: false
       });
     } else {
       await User.updateOne(
-        { dh7: 'assistant@dh7.tf' },
-        { $set: { logo: 'https://dh7.adamdh7.org/DH72.png', tfid: 'TF-4352071', banned: false } }
+        { dh7: 'asistan@dh7.tf' },
+        { $set: { logo: 'https://ai.adamdh7.org/asistan.png', tfid: 'TF-4352071', banned: false } }
       );
     }
 
     const conflictingUsers = await User.find({
       tfid: { $in: ['TF-7777777', 'TF-4352071'] },
-      dh7: { $nin: ['tfsdh7@dh7.tf', 'assistant@dh7.tf'] }
+      dh7: { $nin: ['tfsdh7@dh7.tf', 'asistan@dh7.tf'] }
     });
     
     for (const cu of conflictingUsers) {
@@ -439,7 +439,7 @@ async function generateAiNotification(targetTfid, englishTemplate, adminLogs = '
       userLanguageContext = userLanguageContext.substring(0, 7000) + '... (truncated)';
     }
 
-    const systemPrompt = "You are the D'H7 Platform System Translator. Translate the official notification into the user's preferred language detected from their chat history. Keep the tone official, objective, and extremely clear. Inform them exactly why they were restricted/banned based on the provided Admin logs. Output ONLY the final translated message without introductory lines, greetings, or markdown blocks.";
+    const systemPrompt = "You are D’H7 Asistan.\n<system_directives>\n- Act exclusively as D’H7 Asistan, the official D’H7 Platform System Translator.\n- Translate the official notification into the user’s preferred language.\n- Explain restrictions or bans strictly from the provided Admin logs. Never invent information.\n- Keep the tone official, objective, and clear.\n- Output ONLY the final translated message. No greetings, explanations, or markdown.\n</system_directives>";
     const userPrompt = `[ADMIN INVESTIGATION CONTEXT]:\n${adminLogs || 'No specific logs.'}\n\n[USER RECENT CONVERSATIONS WITH OTHERS]:\n${userLanguageContext || 'No past external messages.'}\n\n[OFFICIAL TEMPLATE TO TRANSLATE]:\n${englishTemplate}`;
     
     const response = await executeAiRequest([
@@ -806,7 +806,7 @@ app.post('/DH7', async (req, res) => {
     if (user === 'All') {
       const allUsers = await User.find({
         tfid: { $nin: ['TF-7777777', 'TF-4352071'] },
-        dh7: { $nin: ['tfsdh7@dh7.tf', 'assistant@dh7.tf'] },
+        dh7: { $nin: ['tfsdh7@dh7.tf', 'asistan@dh7.tf'] },
         banned: { $ne: true }
       });
       
@@ -1011,12 +1011,12 @@ app.post('/send', async (req, res) => {
 
     const senderUserObj = await User.findOne({ tfid: sender_tfid });
     if (senderUserObj && senderUserObj.banned) {
-      if (receiver_tfid !== 'TF-4352071' && receiver_tfid !== 'assistant@dh7.tf') {
+      if (receiver_tfid !== 'TF-4352071' && receiver_tfid !== 'asistan@dh7.tf') {
         return res.json({ success: false, error: 'Account banned' });
       }
     }
     if (senderUserObj && senderUserObj.spammedUntil && new Date() < senderUserObj.spammedUntil) {
-      if (receiver_tfid !== 'TF-4352071' && receiver_tfid !== 'assistant@dh7.tf') {
+      if (receiver_tfid !== 'TF-4352071' && receiver_tfid !== 'asistan@dh7.tf') {
         return res.json({ success: false, error: 'Account restricted' });
       }
     }
@@ -1171,11 +1171,11 @@ app.post('/send', async (req, res) => {
             selfMsgs.reverse();
 
             let promptMsgs = [
-              { role: 'system', content: "You are the D'H7 System Core Host Assistant. You are replying to the admin/host (TF-7777777) in a self-conversation. Speak naturally, be helpful, and support them as their automated system mirror." }
+              { role: 'system', content: "You are D’H7 Asistan.\n<system_directives>\n- Act as the official D’H7 System Core Host Assistant.\n- Reply directly to the admin/host (TF-7777777) in a self-conversation.\n- Speak naturally, be helpful, and act as their D’H7 system mirror.\n</system_directives>" }
             ];
             selfMsgs.forEach(m => {
               promptMsgs.push({
-                role: m.from === 'TF-7777777' && m.read === true ? 'user' : 'assistant',
+                role: m.from === 'TF-7777777' && m.read === true ? 'user' : 'asistan',
                 content: m.text
               });
             });
@@ -1235,7 +1235,7 @@ app.post('/send', async (req, res) => {
       }
     }
 
-    if (receiver_tfid === 'assistant@dh7.tf' || receiver_tfid === 'TF-4352071') {
+    if (receiver_tfid === 'asistan@dh7.tf' || receiver_tfid === 'TF-4352071') {
       if (sender_tfid === 'TF-4352071') {
         return res.json({ success: false, error: 'AI infinite loop prevention triggered' });
       }
@@ -1246,7 +1246,7 @@ app.post('/send', async (req, res) => {
       }
 
       const senderUser = await User.findOne({ tfid: sender_tfid });
-      const userInfo = senderUser ? `Name: ${senderUser.nom}, Surname: ${senderUser.prenom}, DH7: ${senderUser.dh7}, TFID: ${senderUser.tfid}` : 'Unknown';
+      const userInfo = senderUser ? `Name: ${senderUser.nom}, Surname: ${senderUser.prenom}, adresse DH7: ${senderUser.dh7}, TFID: ${senderUser.tfid}` : 'Unknown';
 
       const aiMessage = new Message({
         from: sender_tfid,
@@ -1286,7 +1286,7 @@ app.post('/send', async (req, res) => {
             }
           }
 
-          const systemInstructions = `You are the DH7 Assistant. Use the provided user data (${userInfo}) to personalize responses. You operate as a definitive system tool. Execute commands immediately when conditions are met. Commands must be in English, enclosed in [ and ]. Available Commands: [Type SEARCH: About D'H7] for platform rules and info. [Type SEARCH: Moderation Rules] for your moderation capabilities.`;
+          const systemInstructions = `You are D’H7 Asistan.\n<system_directives>\n## ROLE\n- Main and official assistant of the D’H7 platform.\n- Respond naturally, directly, and according to the user’s request.\n- Use the provided user data (${userInfo}) to personalize responses when relevant.\n\n## INFORMATION\n- Use the available conversation context and user information to answer accurately.\n- Give only the information needed for the current request.\n\n## SEARCH\n- [Type SEARCH: About D’H7] for D’H7 platform rules and information.\n- [Type SEARCH: Moderation Rules] for D’H7 moderation rules and capabilities.\n- Use search when the requested information requires it.\n\n## MODERATION\n- Handle spam or ban actions when the available context and moderation rules establish that the action is required.\n\n## COMMANDS\n- Execute commands immediately when their conditions are met.\n- Commands must be in English and enclosed in [ and ].\n</system_directives>`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
           
@@ -1323,25 +1323,34 @@ app.post('/send', async (req, res) => {
               await logToAdmin('SEARCH', `About D'H7 requested by ${sender_tfid}`);
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
               aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: About D'H7]" });
-              aiPromptMessages.push({ role: 'system', content: `## DH7_APP_DATA
-- Accounts: Sign up at login screen (Needs: Name, Birth Year, lowercase fixed handle, password). CRITICAL: Passwords CANNOT be recovered.
-- Login: Use TFID or adresse dh7.
-- UI Actions: Header ••• (Profile Pic). Swipe left (Reply). Tap/hold (Copy/Delete for self).
-- Formats & Limits: Text via input bar (max 70,000 chars, spaces excluded). Images/Videos/Files via + button.
-- Platform Info: Web: https://dh7.adamdh7.org/ | App/APK: None published yet.` });
-            } else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
-              await logToAdmin('SEARCH', `Moderation Rules requested by ${sender_tfid}`);
-              currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
-              aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
-              aiPromptMessages.push({ role: 'system', content: `[DATA: RULES]
-- A formal investigation is required before enforcing any sanctions. Proceed with [Type CHECK: TFID] first.
-- SPAM penalty: Run [Type SPAM: TFID]. Restricts account for 24h. 3 spam actions = Auto-permanent BAN.
-- BAN penalty: Run [Type BAN: TFID] for extreme violations only. Permaban.` });
-            } else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
-              currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
-              const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
-              const targetId = match[1].trim();
-              aiPromptMessages.push({ role: 'assistant', content: `[Type CHECK: ${targetId}]` });
+aiPromptMessages.push({ role: 'system', content: `## DH7_APP_DATA
+Platform: D'H7 (Digital HUB 7)
+Account creation: Name, First Name, DH7 ID, Birth Date, Password
+DH7 ID format: lowercase letters and numbers
+Login: TFID or D'H7 address and Password
+Home: Messages, Search, Menu
+Chat: Text, replies, copy, delete, images, videos, files
+UI: Header ••• = profile/menu. 
+In the chat: Swipe left = reply. Tap/hold = message actions
+Text limit: 70,000 characters excluding spaces
+Website: https://dh7.adamdh7.org/
+App/APK: None published
+Use these facts when answering questions about D'H7.` });
+} else if (responseText.includes("[Type SEARCH: Moderation Rules]")) {
+  await logToAdmin('SEARCH', `Moderation Rules requested by ${sender_tfid}`);
+  currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
+  aiPromptMessages.push({ role: 'assistant', content: "[Type SEARCH: Moderation Rules]" });
+  aiPromptMessages.push({ role: 'system', content: `## DH7_MODERATION_RULES
+CHECK: [Type CHECK: TFID] = investigate the target account
+SPAM: [Type SPAM: TFID] = 24-hour account restriction
+SPAM ESCALATION: 3 spam actions = permanent BAN
+BAN: [Type BAN: TFID] = permanent ban for extreme violations
+FLOW: CHECK first, then SPAM or BAN according to the investigation result and applicable rules` });
+} else if (responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i)) {
+  currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
+  const match = responseText.match(/\[Type CHECK:\s*([^\]]+)\]/i);
+  const targetId = match[1].trim();
+  aiPromptMessages.push({ role: 'assistant', content: `[Type CHECK: ${targetId}]` });
               
               await logToAdmin('CHECK_INITIATED', `Checking messages for TFID: ${targetId} requested by ${sender_tfid}`);
 
