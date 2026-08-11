@@ -1283,9 +1283,7 @@ Use the available results and previous context to continue the decision.
 
 ## OUTPUT
 Normal request: answer normally.
-Tool request: output only the exact command and nothing else, start with [ and end with ] always this way.
-Command format must be exactly [Type COMMAND: VALUE].
-`;
+Tool request: output only the exact command and nothing else, start with [ and end with ] always this way like [Type COMMAND-NAME: ....].`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
 
