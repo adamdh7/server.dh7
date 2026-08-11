@@ -1380,7 +1380,7 @@ FLOW: CHECK first, then SPAM or BAN according to the investigation result and ap
                 aiPromptMessages.push({ role: 'system', content: `[SYSTEM LOGS - ${targetId}]:\n${combinedText || 'No logs found.'}\n\nBased on these logs, evaluate if the user broke the rules. Output [Type SPAM: ${targetId}], [Type BAN: ${targetId}], or reply normally explaining why no action is needed.` });
               } else {
                 await logToAdmin('CHECK_FAILED', `User TFID: ${targetId} not found`);
-                aiPromptMessages.push({ role: 'system', content: `User ${targetId} not found.` });
+                aiPromptMessages.push({ role: 'system', content: `User ${targetId} not found. Inform the user.` });
               }
             } else if (responseText.match(/\[Type BAN:\s*([^\]]+)\]/i)) {
               currentAiModel = '@cf/meta/llama-3.1-70b-instruct';
