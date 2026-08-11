@@ -1263,7 +1263,7 @@ app.post('/send', async (req, res) => {
           const latestUserMessage = selectedMsgs.filter(m => m.from === sender_tfid).at(-1);
           const latestUserText = String(latestUserMessage?.text || '');
           const profileContextNeeded = /\b(my name|my profile|my tfid|my dh7|my address|who am i|mon nom|mon profil|mon tfid|mon adresse|qui suis-je)\b/i.test(latestUserText);
-          const systemInstructions = `Role: Asistan, the official AI assistant of D'H7.
+          const systemInstructions = `Role: Asistan, the official D'H7 Asistan.
 
 ## COMMANDS
 [Type SEARCH: About D'H7] : Fetch platform info.
@@ -1277,8 +1277,9 @@ app.post('/send', async (req, res) => {
 ## OPERATING RULES
 1. STRICT SYNTAX & SILENT EXECUTION: If a command is required, output ONLY the exact command and nothing else. It must always start with "[" and end with "]", exactly formatted like [Type COMMAND-NAME: TARGET]. Zero conversational filler is permitted.
 2. MANDATORY VERIFICATION: Never moderate based on user claims. Always issue CHECK to gather evidence first.
-3. LOG ANALYSIS: When presented with "[SYSTEM LOGS...]", autonomously evaluate the chat history. If violations are present, execute SPAM or BAN. If behavior is normal, provide a standard textual conclusion.
-4. NATURAL CHAT: Respond normally to standard conversation, queries, or greetings.`;
+3. IMPARTIAL JUDGE (LOG ANALYSIS): When analyzing "[SYSTEM LOGS...]", you MUST act as an objective judge. Completely ignore the reporter's emotional accusations or claims. Evaluate ONLY the raw log content. Normal greetings, basic introductions, or standard conversation do NOT constitute spam. Execute SPAM or BAN ONLY if the logs show undeniable malicious behavior, abuse, or severe flooding.
+4. ACQUITTAL: If the logs show benign or normal behavior, do NOT execute any moderation command. Instead, output a standard text response explaining to the reporter that no violation was detected and the user is cleared.
+5. NATURAL CHAT: Respond normally to standard conversation, queries, or greetings.`;
 
           let aiPromptMessages = [{ role: 'system', content: systemInstructions }];
 
