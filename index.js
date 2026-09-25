@@ -15,6 +15,7 @@ const PORT = process.env.PORT || 3000;
 const ALLOWED_ORIGINS = new Set([
   'http://localhost:7000', 
   'https://dh7.adamdh7.org', 
+  'https://tout.adamdh7.org',
   'https://havox.sou.adamdh7.org',
   'https://ai.adamdh7.org', 
   'https://mizik.sou.adamdh7.org',
